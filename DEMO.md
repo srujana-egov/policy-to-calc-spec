@@ -255,8 +255,34 @@ flowchart TD
 
 Same color key as §3. Compare the two diagrams directly: everything purple/blue/orange/yellow in
 the middle is completely unchanged from Architecture A — what's added is only the grey boxes
-(workflow states, the gateway, MCP, the gate, the audit log), which is exactly the "new work vs.
-reused" claim below made visual.
+(workflow states, the gateway, MCP, the gate, the audit log).
+
+**What each grey piece concretely adds — what specifically breaks without it:**
+
+- **Workflow states.** Without this, when five documents get uploaded this week, there is no
+  answer to "which ones are still processing, which are waiting for someone to review, which got
+  approved" — except manually asking around. Someone would have to build a database table, write
+  code to update its status, and write code to query it — a small custom system, reinvented, that
+  the workflow service already does off the shelf, plus it already knows *who's allowed* to
+  approve (RBAC) and *keeps every state change forever* (audit), neither of which a plain status
+  column gives you for free.
+- **API Gateway.** Without this, the pipeline itself would need to verify "is this really an
+  authorized admin for this tenant, and are they allowed to do this" — security-critical code,
+  written and maintained separately from every other service on the platform that already checks
+  this the same way. Skipping it means either duplicating that logic (a place for it to be gotten
+  wrong) or having no real check at all.
+- **MCP.** This isn't required for the pipeline's core logic to run — validate/simulate/synthesize
+  work as plain function calls regardless. What MCP specifically buys: the confirmation gate
+  attaches automatically to anything called as an MCP tool, and any *other* AI-driven flow on the
+  platform (a general admin assistant, say) can safely call "create a calculation rule" through
+  the same governed path instead of this project needing to build its own separate
+  confirm-then-write mechanism from scratch.
+- **MDMS.** This is the direct fix for the specific "one rule, many trade names" gap named in
+  earlier sections: the Calculation Engine can only condition on a single value or a numeric
+  range, not "any of these 250 trade names." MDMS stores the mapping (`"Plastic works" →
+  MICRO_COTTAGE`, and 249 more) once, so the incoming payload already carries a single
+  `category = MICRO_COTTAGE` field looked up before the engine ever sees it — turning "250
+  possible names" into the one value the schema already knows how to match on.
 
 **What's genuinely new work here vs. reused:** the workflow's state/action config (new, but ~50
 lines of config, not custom code — see the worked example in §9), the review screen (new, not
@@ -270,13 +296,19 @@ where Architecture A's plain status table does the same job for far less setup.
 
 ## 9. DIGIT services: where they genuinely help, and where they don't
 
+**§8C explains what each service concretely adds and what breaks without it. This section is the
+separate decision on top of that: given it *would* help, is it worth adding *right now*.** Those
+are two different questions — a service can be a genuinely good fit in principle and still be the
+wrong thing to build today, if the stakes don't yet justify its setup cost (see Architecture A vs.
+C). The table below applies that test — "does this specific piece of the project need what this
+service provides, at the current stage, not eventually" — to every candidate service, not just
+the ones that make an easy case.
+
 **Background finding this builds on:** an earlier internal proof (built for a different DIGIT
 service, Public Grievance Redressal) already established that general-purpose automation/data-
 integration tools are not stateful business-process engines — no persistent per-entity queryable
 state, no loops without node duplication, no per-step RBAC, no SLA enforcement, short/configurable
-audit retention far below government requirements. The table below applies that same honest test
-— "does this specific piece of the project actually need what this service provides, right now" —
-to every candidate DIGIT service, not just the ones that make an easy case.
+audit retention far below government requirements.
 
 | DIGIT service | Would it help this project? | Why / why not | When to actually add it |
 |---|---|---|---|
@@ -401,10 +433,23 @@ worth re-checking before any cost commitment to a client.
 
 ## 13. Other practical concerns
 
-- **Data privacy / hosting.** Policy documents leave the platform's own environment and go to a
-  third-party LLM API. For government fee schedules this is probably low-sensitivity, but this
-  hasn't been decided as policy — worth an explicit call on data residency/processing terms before
-  this handles real client documents, not an assumption.
+- **Data privacy / hosting — and how to actually address it, not just flag it:**
+  1. **Confirm a zero-data-retention agreement** with whichever LLM provider is used — both major
+     providers offer enterprise terms where prompt/response content isn't retained beyond serving
+     the request and isn't used for model training. This is a standard commercial agreement, not
+     new engineering — the cheapest, fastest thing to actually close.
+  2. **Send less.** Once "locate relevant spans" (§3, step 2) is built, only the fee-relevant span
+     goes to the API, not the whole document — this shrinks exposure of anything unrelated and
+     sensitive that a messy real-world document might contain (e.g. Bissau's questionnaire has
+     staffing and internal-process detail nowhere near the fee tables).
+  3. **If data residency is a hard regulatory requirement** for a given client (not yet confirmed
+     either way), the fallback is a self-hosted open-weight model on the platform's own
+     infrastructure instead of a third-party API — real infrastructure cost and very likely lower
+     extraction quality than a frontier hosted model, so only worth it if (1) genuinely can't be
+     satisfied.
+  4. **The action item, concretely:** get an explicit data-processing agreement reviewed and
+     signed off before any real (non-fixture) client document goes through this pipeline — this is
+     a governance step to schedule, not a technical unknown to keep researching.
 - **Vendor and pricing dependency.** Introductory pricing on at least one provider expires this
   year with a real, dated increase. Building in a provider-agnostic layer (already done in the
   prototype — either major provider's key works) reduces lock-in but doesn't remove the pricing
@@ -419,9 +464,21 @@ worth re-checking before any cost commitment to a client.
   change make extraction better or worse" with a number — everything demonstrated so far is two
   real documents, read carefully, not a repeatable, scored test set. Building that test set is
   real, separate work, not something that falls out of what exists today.
-- **Multi-language documents untested.** The Chennai source had a Tamil legal preamble (stripped
-  before use here); genuine non-English source documents from other geographies haven't been
-  tested at all.
+- **Multi-language documents untested — and the concrete way to close this, not just note it:**
+  1. **Get one real non-English source document** (ideally an actual Portuguese-language document
+     from the Guinea-Bissau context, not another English-language stand-in) and run it through
+     Pass A/B exactly as built — this is a direct, cheap test, not a research project.
+  2. Both major model families are trained on many languages and generally handle non-English
+     input without a separate translation step — but that's a general capability claim, not
+     something verified for *this specific task's prompts*, so treat it as untested until step 1
+     is actually done, not assumed safe because the underlying model is "known to be multilingual."
+  3. **Add one explicit instruction** to the Pass A/B/Synthesize prompts: produce the analysis,
+     assumptions, and worked examples in a fixed output language (e.g. English) regardless of the
+     source document's language — so every downstream step (validate, simulate, review) has a
+     consistent language to work with even when the input doesn't.
+  4. **Fallback, only if step 1 reveals a real gap:** a machine-translation preprocessing step
+     before Pass A. Treat this as a documented contingency, not a default — likely unnecessary
+     given current model capability, but cheap to keep in reserve.
 - **Nothing has been run against a live API successfully in this review.** Every demonstrated
   extraction/synthesis output in this document came from either hand-authored fixtures or live
   conversational reasoning — not a completed automated run. This is the single most important
