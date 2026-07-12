@@ -59,7 +59,71 @@ Yellow = partially built. Grey/dashed = designed but not built.
 Only 3 of these 9 steps actually call an LLM (Pass A analyze, Pass B extract, Synthesize) — the
 rest are either plain deterministic code or not yet built.
 
-## 4. Walkthrough — Chennai example (proven, real output)
+## 4. Structured outputs, and why `PolicyRule[]` looks the way it does
+
+**What "structured outputs" actually means:** instead of asking an LLM to "please return JSON" in
+a prompt and writing repair logic for when it doesn't comply, both major providers' APIs support
+passing an actual schema that the response is *constrained* to match at the API level — the model
+literally cannot return a malformed shape. This removes an entire class of failure (parse errors,
+missing fields, wrong types) before it can happen, rather than catching it after the fact. That's
+the mechanism behind every purple ("sent to an LLM") box in §3's diagram.
+
+**The actual shape**, as defined and sent to the API:
+
+```python
+class Band(BaseModel):
+    from_: Optional[float]   # aliased to "from" — inclusive lower bound; omitted = unbounded below
+    to: Optional[float]      # inclusive upper bound; omitted = unbounded above
+    amount: float            # the fee for this band
+
+class PolicyRule(BaseModel):
+    scheduleId: str          # which section of the source document this came from
+    tradeNames: list[str]    # every named item this pattern applies to
+    conditionAttribute: str  # what the fee is banded on, or "none" for a flat fee
+    suggestedJsonPath: str   # a guess at where this lives in a real payload — not authoritative yet
+    bands: list[Band]
+    sourceText: str          # verbatim quote — traceability back to the original document
+    confidence: float        # 0-1, the model's own signal of how sure it is
+```
+
+Concretely, for the Chennai example in §5:
+
+```json
+{
+  "scheduleId": "SCHEDULE-I-A",
+  "tradeNames": ["Plastic works", "Tailoring Machine", "...47 total"],
+  "conditionAttribute": "premisesArea",
+  "suggestedJsonPath": "$.tradeLicenseDetail.premisesArea",
+  "bands": [{"to": 1000, "amount": 2000}, {"from": 1000, "amount": 5000}],
+  "sourceText": "Up to 1000 sq.ft. Rs.2000/- ; Above 1000 Sq.ft. Rs.5000/-",
+  "confidence": 0.9
+}
+```
+
+**Why this shape, specifically — every field earns its place:**
+
+- **`scheduleId` + `sourceText`** — traceability. A reviewer (or a later debugging session) can
+  always trace a generated rule back to the exact sentence it came from; without this, "why did it
+  produce this number" has no answer.
+- **`tradeNames` as a list, not a single value** — the direct answer to the *breadth* problem from
+  the Chennai example: one pattern, many names, captured explicitly, rather than extraction
+  silently picking one representative name and losing the other 46.
+- **`conditionAttribute` + `suggestedJsonPath` + `bands`, kept separate and simple** — this is
+  deliberately *not yet* the final `CalculationRule` shape (no `ruleType`, no `calculationType`, no
+  schema-specific conditions object). It's a plain, schema-agnostic description of "what varies,
+  and what it costs" — cheap for a human, or the next stage, to sanity-check, because a mistake
+  here shows up in three plain fields, not buried inside a JSONPath-heavy nested object.
+- **`confidence`** — not decorative. This is what actually dropped to 0.7 on the genuinely
+  ambiguous Petrol Bunk/Service station case in §5 — a real, usable signal for the ambiguity-tiering
+  step to act on, once it's built as more than a flat list.
+
+**Why not skip this and extract straight to `CalculationRule` in one step:** exactly the reasoning
+behind keeping extraction and synthesis as two separate stages in §3 — a wrong read of "above 1000
+sq.ft." is visible and fixable in this small, plain structure, instead of being buried inside a
+`RATE_MATRIX`/`FLAT` object with JSONPath conditions and priority fields already attached. Two
+cheap-to-verify steps beat one hard-to-verify step.
+
+## 5. Walkthrough — Chennai example (proven, real output)
 
 **Document:** a formal municipal trade-licence fee notification. Schedule I: ~250 named trades
 collapsed into a handful of fee patterns — hard because of *breadth*.
@@ -86,7 +150,7 @@ collapsed into a handful of fee patterns — hard because of *breadth*.
 Steps 7-8 above are genuinely proven — this is real code that ran and produced these exact
 numbers, not a mock-up.
 
-## 5. Walkthrough — Bissau example (illustrative, not yet run through the built code)
+## 6. Walkthrough — Bissau example (illustrative, not yet run through the built code)
 
 **Document:** a 14-page filled-in requirements questionnaire for a business-licence
 digitalization effort — hard because of *needle-in-haystack*: only one page has fee numbers, the
@@ -104,7 +168,7 @@ rest is staffing, legal history, and process narrative.
   preview of what Pass A/B should produce — it has not yet been run through the actual
   `extract.py`/`synthesize.py` code end to end. Treat Chennai as proven, Bissau as designed-for.
 
-## 6. Why not a multi-agent design (e.g. one "policy" agent + one "calc-engine" agent)?
+## 7. Why not a multi-agent design (e.g. one "policy" agent + one "calc-engine" agent)?
 
 This was seriously considered and rejected, for concrete reasons, not by default:
 
@@ -130,7 +194,7 @@ The actual design keeps this as roles, not agents: an LLM role for the two under
 calls, code for the two rulebook-checking calls, and a human for the one genuinely irreducible
 judgment call — connected by a fixed pipeline, not a negotiation between autonomous agents.
 
-## 7. Three proposed architectures
+## 8. Three proposed architectures
 
 ### A. Lean pipeline (current build; recommended for UAT / pilot stage)
 Two-pass LLM extraction + synthesis, both via structured outputs (guaranteed-schema-conformant,
@@ -139,7 +203,7 @@ framework, no orchestration engine, no DIGIT dependency. Storage: a simple statu
 a minimal screen (still to be built). **Cheapest to build, cheapest to run, easiest to debug** —
 appropriate while stakes are "a tester notices a mistake in UAT," not "a citizen is overcharged."
 
-### B. Multi-agent (considered, rejected — see §6)
+### B. Multi-agent (considered, rejected — see §7)
 A "policy understanding" agent and a "calculation engine" agent, each autonomous and
 tool-calling, coordinating via message-passing. Rejected: unnecessary coordination overhead and
 risk for a task whose steps don't need to be decided at runtime.
@@ -151,30 +215,51 @@ changes. What changes is everything *around* it: instead of a plain status table
 the admin's upload, the review/approval lifecycle, and the eventual write are each handled by an
 existing platform service instead of custom code.
 
+This is the full picture — every pipeline step from §3, not abstracted away, shown alongside
+exactly which platform service wraps it:
+
 ```mermaid
 flowchart TD
     ADMIN["Admin uploads document"] --> KONG["API Gateway<br/>(auth, RBAC, forwards the<br/>admin's own token — never<br/>a service account)"]
     KONG --> WFNEW["Workflow Service:<br/>create request, state = DRAFT_GENERATED"]
-    WFNEW --> PIPELINE["Same core pipeline as Architecture A<br/>(Extract -> Synthesize -> Validate -> Simulate)<br/>— unchanged"]
-    MDMS["Master Data Service<br/>(trade-name -> category mapping,<br/>only if that path is chosen — see §8)"] -.-> PIPELINE
 
-    PIPELINE -->|passes validation| WFREVIEW["Workflow Service:<br/>state -> PENDING_FOR_REVIEW"]
-    PIPELINE -->|fails after 1 retry| WFFAIL["Workflow Service:<br/>state -> FAILED_VALIDATION<br/>(routed to a developer)"]
+    WFNEW --> S1["1. Ingest"]:::notbuilt --> S2["2. Locate relevant spans"]:::notbuilt
+    S2 --> S3D["3. Pass A — Analyze"]:::ai --> S4D["4. Pass B — Extract PolicyRule[]"]:::ai
+    S4D --> S5D["5. Ambiguity list"]:::partial --> S6D["6. Synthesize CalculationRule[]"]:::ai
+    MDMS["Master Data Service<br/>(trade-name -> category mapping,<br/>only if that path is chosen — see §9)"] -.-> S4D
 
+    S6D --> S7D{"7. Validate"}:::code
+    S7D -->|fails, 1 retry| S6D
+    S7D -->|fails again| WFFAIL["Workflow Service:<br/>state -> FAILED_VALIDATION<br/>(routed to a developer)"]:::notbuilt
+    S7D -->|passes| S8D["8. Simulate"]:::code
+
+    S8D --> WFREVIEW["Workflow Service:<br/>state -> PENDING_FOR_REVIEW"]
     WFREVIEW --> SEARCHAPI["Existing platform search API<br/>answers 'what's pending my review'<br/>— no new code"]
-    SEARCHAPI --> REVIEWUI["Review screen (still to be built)"]
-    REVIEWUI -->|request correction| WFCORRECT["Workflow Service:<br/>state -> NEEDS_CORRECTION"]
-    WFCORRECT -->|loops back, natively| PIPELINE
-    REVIEWUI -->|approve| WFAPPROVE["Workflow Service:<br/>state -> APPROVED"]
+    SEARCHAPI --> S9D["9. Business user review"]:::human
+    S9D -->|request correction| WFCORRECT["Workflow Service:<br/>state -> NEEDS_CORRECTION"]
+    WFCORRECT -->|loops back, natively| S6D
+    S9D -->|approve| WFAPPROVE["Workflow Service:<br/>state -> APPROVED"]
 
     WFAPPROVE --> MCPTOOL["MCP tool call<br/>(createCalculationRule)"]
     MCPTOOL --> GATE["Confirmation Gate<br/>(literal endpoint+params shown,<br/>human YES/NO — reused, not new)"]
     GATE -->|confirmed| CALCENGINE["Calculation Engine:<br/>POST /{module}/rules"]
+    CALCENGINE --> WFPUBLISH["Workflow Service:<br/>state -> PUBLISHED"]
     CALCENGINE --> AUDITLOG["Audit Log<br/>(same deterministic writer<br/>every AI-driven write uses)"]
+
+    classDef ai fill:#e8d9f7,stroke:#6a3fa0,color:#1a1a1a
+    classDef code fill:#cfe3fb,stroke:#1b4d89,color:#1a1a1a
+    classDef human fill:#fbe3c9,stroke:#a15b00,color:#1a1a1a
+    classDef partial fill:#fff3c4,stroke:#a17f00,color:#1a1a1a
+    classDef notbuilt fill:#eeeeee,stroke:#888888,color:#555555,stroke-dasharray: 5 5
 ```
 
+Same color key as §3. Compare the two diagrams directly: everything purple/blue/orange/yellow in
+the middle is completely unchanged from Architecture A — what's added is only the grey boxes
+(workflow states, the gateway, MCP, the gate, the audit log), which is exactly the "new work vs.
+reused" claim below made visual.
+
 **What's genuinely new work here vs. reused:** the workflow's state/action config (new, but ~50
-lines of config, not custom code — see the worked example in §8), the review screen (new, not
+lines of config, not custom code — see the worked example in §9), the review screen (new, not
 avoidable in any architecture), and the MDMS mapping (new, only if that path is chosen). The
 gateway, the confirmation gate, MCP tooling, and the audit log are **existing platform
 infrastructure, not built for this project** — this architecture's whole value proposition is
@@ -183,7 +268,7 @@ paying only for the new config, not rebuilding the plumbing around it.
 **Only worth the setup cost once this handles real production billing — not for a UAT pilot**,
 where Architecture A's plain status table does the same job for far less setup.
 
-## 8. DIGIT services: where they genuinely help, and where they don't
+## 9. DIGIT services: where they genuinely help, and where they don't
 
 **Background finding this builds on:** an earlier internal proof (built for a different DIGIT
 service, Public Grievance Redressal) already established that general-purpose automation/data-
@@ -195,7 +280,7 @@ to every candidate DIGIT service, not just the ones that make an easy case.
 
 | DIGIT service | Would it help this project? | Why / why not | When to actually add it |
 |---|---|---|---|
-| **Workflow service** (state machine, e.g. used for PGR) | Yes, but not yet | The review/approve/correct lifecycle (§7C) is structurally identical to a PGR-style process: states, a loop, RBAC on who can approve, a long audit trail. But UAT stakes don't require any of that yet. | Once this moves toward production billing — see Architecture C |
+| **Workflow service** (state machine, e.g. used for PGR) | Yes, but not yet | The review/approve/correct lifecycle (§8C) is structurally identical to a PGR-style process: states, a loop, RBAC on who can approve, a long audit trail. But UAT stakes don't require any of that yet. | Once this moves toward production billing — see Architecture C |
 | **Master Data Service (MDMS)** | Yes, now | It's the literal mechanism named as one of two ways to close the trade-classification gap (§ open questions) — not a forced fit, an already-identified option | As soon as that classification path is chosen over extending the Calculation Engine's schema |
 | **API Gateway** | Yes, always | Any real deployment needs auth/RBAC at the edge regardless of architecture — this isn't optional infrastructure, it's baseline | From day one of any real (non-local) deployment |
 | **MCP tooling** | Yes, once there's a real service to protect | Turns validate/simulate (and the eventual real write) into governed, auditable tool calls instead of ad hoc function calls | Once this talks to a real Calculation Engine instance, not local JSON files |
@@ -206,7 +291,7 @@ to every candidate DIGIT service, not just the ones that make an easy case.
 | **MDMS for storing the actual `CalculationRule` specs** | **No** | That's the Calculation Engine's own job — MDMS is reference/master data, not transactional rule storage | Never — this would be the wrong abstraction, not a maturity question |
 | **Workflow service on a deployment with no platform underneath it** | **No** | Forces a heavy platform dependency onto a context that may not have or want one (e.g. a lean standalone SaaS deployment) | Only if that deployment model is explicitly chosen — see open question on deployment model |
 
-## 9. Where this fits the platform's broader AI architecture, and where MCP sits
+## 10. Where this fits the platform's broader AI architecture, and where MCP sits
 
 **The existing pattern, in one picture** (how the platform's AI architecture already handles
 *any* AI-driven write today, e.g. a chat interface creating a record):
@@ -243,7 +328,7 @@ normally a simple parameter-filling task; here it's the entire multi-step reason
 §3. That's a new capability class for this architecture, not a drop-in reuse of an existing
 pattern — worth presenting as "the first of its kind," not "just another consumer."
 
-## 10. Graceful degradation — this doesn't stop working if AI is down or wrong
+## 11. Graceful degradation — this doesn't stop working if AI is down or wrong
 
 **The core claim: only 2 of the 9 pipeline stages in §3 actually depend on AI at all (Pass A,
 Pass B/Extract) plus one more that's AI-assisted but not AI-only (Synthesize).** Validate,
@@ -288,7 +373,7 @@ What's true today is narrower but still meaningful: the "spine" (validate/simula
 gate/write) already works on any valid `CalculationRule` JSON regardless of its origin, which is
 what makes this degradation path possible to build cheaply rather than a redesign.
 
-## 11. LLM costs — estimated, not yet measured
+## 12. LLM costs — estimated, not yet measured
 
 **Caveat up front: every attempt to run this pipeline against a live API in this environment
 failed on API-key issues, not on the pipeline itself — these are computed estimates from real
@@ -314,7 +399,7 @@ likely still smaller than the engineering cost of building the remaining pieces.
 pricing on at least one provider is time-limited and will roughly increase 1.5x later this year —
 worth re-checking before any cost commitment to a client.
 
-## 12. Other practical concerns
+## 13. Other practical concerns
 
 - **Data privacy / hosting.** Policy documents leave the platform's own environment and go to a
   third-party LLM API. For government fee schedules this is probably low-sensitivity, but this
@@ -324,7 +409,7 @@ worth re-checking before any cost commitment to a client.
   year with a real, dated increase. Building in a provider-agnostic layer (already done in the
   prototype — either major provider's key works) reduces lock-in but doesn't remove the pricing
   risk itself.
-- **API availability during a live review.** See §10 for the fallback design — the short version
+- **API availability during a live review.** See §11 for the fallback design — the short version
   is that the deterministic spine doesn't depend on AI being up, but the retry/fallback ladder
   itself isn't wired together as a real, tested flow yet.
 - **Prompt/schema drift.** As the Calculation Engine's schema gains new capabilities, the
@@ -342,7 +427,7 @@ worth re-checking before any cost commitment to a client.
   conversational reasoning — not a completed automated run. This is the single most important
   thing to close before treating any of the above as fully proven.
 
-## 13. Open questions for the team
+## 14. Open questions for the team
 
 1. **Trade-classification gap**: extend the Calculation Engine with a "matches any of these named
    values" condition operator, vs. push classification upstream into master data. Only matters for
