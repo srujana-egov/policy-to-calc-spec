@@ -130,6 +130,16 @@ Concretely, for the Chennai example in §5:
 - **`tradeNames` as a list, not a single value** — the direct answer to the *breadth* problem from
   the Chennai example: one pattern, many names, captured explicitly, rather than extraction
   silently picking one representative name and losing the other 46.
+
+  **The schema gap this is actually working around, stated plainly (referenced elsewhere as
+  "the schema gap," defined here once):** the real Calculation Engine's condition object only
+  supports matching a single exact value or a numeric range — there is no "this attribute is one
+  of these 250 named values" operator anywhere in `calculation-engine-3.0.0.yaml`. Storing
+  `tradeNames` as a list here doesn't close that gap — the final `CalculationRule` still can't
+  express "any of these 250 names" directly. It just means the *information* isn't lost at the
+  extraction stage while a real answer to the gap (extend the engine's schema, or resolve
+  classification upstream via MDMS, or a lightweight standalone equivalent — see §8A and §14,
+  open question 1) gets decided.
 - **`conditionAttribute` + `suggestedJsonPath` + `bands`, kept separate and simple** — this is
   deliberately *not yet* the final `CalculationRule` shape (no `ruleType`, no `calculationType`, no
   schema-specific conditions object). It's a plain, schema-agnostic description of "what varies,
@@ -420,7 +430,7 @@ audit retention far below government requirements.
 | DIGIT service | Would it help this project? | Why / why not | When to actually add it |
 |---|---|---|---|
 | **Workflow service** (state machine, e.g. used for PGR) | Yes, but not yet | The review/approve/correct lifecycle (§8C) is structurally identical to a PGR-style process: states, a loop, RBAC on who can approve, a long audit trail. But UAT stakes don't require any of that yet. | Once this moves toward production billing — see Architecture C |
-| **Master Data Service (MDMS)** | Yes, now | It's the literal mechanism named as one of two ways to close the trade-classification gap (§ open questions) — not a forced fit, an already-identified option | As soon as that classification path is chosen over extending the Calculation Engine's schema |
+| **Master Data Service (MDMS)** | Yes, *if that path is chosen* | It's one of three options named for the trade-classification gap (§14, open question 1) — not a forced fit, an already-identified option — but not the only one, and not yet decided | Only once that specific classification path is chosen over the other two options in §14 |
 | **API Gateway** | Yes, always | Any real deployment needs auth/RBAC at the edge regardless of architecture — this isn't optional infrastructure, it's baseline | From day one of any real (non-local) deployment |
 | **MCP tooling** | Yes, once there's a real service to protect | Turns validate/simulate (and the eventual real write) into governed, auditable tool calls instead of ad hoc function calls | Once this talks to a real Calculation Engine instance, not local JSON files |
 | **Confirmation gate + audit log** | Yes, once writes are real | Same reasoning as MCP — there's nothing to gate or audit while output is just a local JSON file | Same trigger as MCP tooling |
@@ -469,9 +479,13 @@ pattern — worth presenting as "the first of its kind," not "just another consu
 
 ## 11. Graceful degradation — this doesn't stop working if AI is down or wrong
 
-**The core claim: only 2 of the 9 pipeline stages in §3 actually depend on AI at all (Pass A,
-Pass B/Extract) plus one more that's AI-assisted but not AI-only (Synthesize).** Validate,
-Simulate, Review, the Confirmation Gate, and the real write have zero AI dependency today —
+**The core claim: only 3 of the 9 pipeline stages in §3 call an LLM at all (Pass A, Pass B,
+Synthesize) — the other 6 have zero AI dependency, and one of those 3 gets checked by one of the
+other 6 before anything downstream trusts it.** Synthesize's own call is just as fully an LLM call
+as Pass A/B — the meaningful difference isn't that it's "less AI," it's that its output never
+proceeds without first passing through the non-AI validator (step 7), whereas nothing today
+automatically checks Pass A/B's output the same way. Validate, Simulate, Review, the Confirmation
+Gate, and the real write have zero AI dependency today —
 `validate.py` and `simulate.py` are plain code that will check and run *any* `CalculationRule`
 JSON handed to them, whether an LLM produced it or a person typed it by hand. AI is an optional
 accelerator sitting in front of an already-AI-independent core — not something the rest of the
@@ -614,3 +628,7 @@ worth re-checking before any cost commitment to a client.
    already-proven document pattern.
 6. **When to invest in an actual evaluation benchmark** — a labeled test set plus a human-baseline
    comparison — rather than continuing to rely on a small number of hand-reviewed examples.
+7. **Correction routing** (§3, §4): a human's rebuttal at step 9 needs to reach different upstream
+   stages depending on whether it's a synthesis judgment call or a source-document misread, and
+   nothing today distinguishes which one a given correction is or routes it automatically. Whoever
+   builds the review screen needs to solve this, not something to discover after it's built.
