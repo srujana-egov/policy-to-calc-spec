@@ -245,9 +245,30 @@ judgment call — connected by a fixed pipeline, not a negotiation between auton
 ### A. Lean pipeline (current build; recommended for UAT / pilot stage)
 Two-pass LLM extraction + synthesis, both via structured outputs (guaranteed-schema-conformant,
 no hand-rolled JSON parsing) → deterministic validation → deterministic simulation. No agent
-framework, no orchestration engine, no DIGIT dependency. Storage: a simple status table. Review:
-a minimal screen (still to be built). **Cheapest to build, cheapest to run, easiest to debug** —
-appropriate while stakes are "a tester notices a mistake in UAT," not "a citizen is overcharged."
+framework, no orchestration engine, no DIGIT dependency. **Cheapest to build, cheapest to run,
+easiest to debug** — appropriate while stakes are "a tester notices a mistake in UAT," not "a
+citizen is overcharged."
+
+**Two capabilities this architecture does NOT solve on its own — named explicitly, not silently
+dropped:**
+
+- **Trade/category classification.** Architecture A has no MDMS. If a document needs the "many
+  trade names, one fee pattern" mapping (the Chennai breadth problem — §4's schema gap), Architecture
+  A as described has nothing that does what MDMS does in Architecture C. Two honest options, not
+  one assumed default: either accept the real limitation — Architecture A only handles
+  attribute/measurement-driven documents (Bissau-shaped, or a single isolated schedule like Chennai
+  Schedule I), not full multi-schedule, many-named-trade documents — or build the lightest possible
+  standalone equivalent: a plain local mapping table (trade name → category, one file or one small
+  table, maintained by this service alone, not a platform master-data service) that gets the same
+  job done without the MDMS dependency. That equivalent isn't built yet either — it's a real,
+  nameable gap, not a detail assumed away.
+- **State management is a plain status column, which is a real capability trade-off, not a free
+  simplification.** No RBAC enforcement on who can move a request from one status to another (that
+  check would have to be written by hand, and is easy to get wrong or skip). No native protection
+  against the correction loop (§3, step 9 → step 6) double-processing a request if it's triggered
+  twice. No permanent history of who changed what, unless that's separately, deliberately logged.
+  A status table is the right *size* for UAT stakes (§9's table), but "simple" here means "these
+  guarantees don't exist," not "these guarantees exist, just implemented more cheaply."
 
 ### B. Multi-agent (considered, rejected — see §7)
 A "policy understanding" agent and a "calculation engine" agent, each autonomous and
@@ -532,10 +553,12 @@ worth re-checking before any cost commitment to a client.
 
 ## 14. Open questions for the team
 
-1. **Trade-classification gap**: extend the Calculation Engine with a "matches any of these named
-   values" condition operator, vs. push classification upstream into master data. Only matters for
-   documents that enumerate specific named entities (like the Chennai trades), not for
-   attribute/measurement-driven documents.
+1. **Trade-classification gap**: three options, not two — extend the Calculation Engine with a
+   "matches any of these named values" condition operator; push classification upstream into MDMS
+   (Architecture C only); or a lightweight standalone local mapping table if Architecture A needs
+   to handle this without a platform dependency (see §8A). Only matters for documents that
+   enumerate specific named entities (like the Chennai trades), not attribute/measurement-driven
+   documents — and unresolved regardless of which architecture is chosen.
 2. **Deployment model**: is the near-term target UAT-only with a lightweight standalone build
    (Architecture A), or does this need to sit on full platform infrastructure from the start
    (Architecture C)? This single decision determines most of the remaining build order.
