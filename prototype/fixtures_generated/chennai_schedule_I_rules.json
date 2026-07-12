@@ -1,0 +1,39 @@
+{
+  "sourceDocument": "core zone4 5 6 8 9 10 13.pdf — SCHEDULE-I, Micro Cottage Industries, trades 1-47",
+  "assumptions": [
+    "\"Above 1000 sq.ft.\" interpreted as area > 1000, not >= 1000 — modeled as from: 1000.01 to avoid an exact overlap with \"Up to 1000 sq.ft.\" (to: 1000) at the boundary. Confirm with business user.",
+    "effectiveFrom set to 2008-07-30 (the council resolution date cited in the document header) — the document does not state a separate effective date for the fee schedule itself. Confirm with business user.",
+    "No tradeCategory condition added, since this demo scopes only Schedule I in isolation. A production spec covering all six schedules would need the tradeCategory/scheduleCode condition discussed in DESIGN.md's 'Open schema gap' section.",
+    "roundOff defaulted to NEAREST_1 (schema default) — the document does not mention rounding."
+  ],
+  "rules": [
+    {
+      "module": "trade-license",
+      "ruleType": "RATE_MATRIX",
+      "component": "MICRO_COTTAGE_LICENSE_FEE",
+      "scope": "ENTITY",
+      "conditions": {
+        "premisesArea": { "jsonPath": "$.tradeLicenseDetail.premisesArea", "to": 1000 }
+      },
+      "calculationType": "FLAT",
+      "value": 2000,
+      "priority": 10,
+      "roundOff": "NEAREST_1",
+      "effectiveFrom": "2008-07-30"
+    },
+    {
+      "module": "trade-license",
+      "ruleType": "RATE_MATRIX",
+      "component": "MICRO_COTTAGE_LICENSE_FEE",
+      "scope": "ENTITY",
+      "conditions": {
+        "premisesArea": { "jsonPath": "$.tradeLicenseDetail.premisesArea", "from": 1000.01 }
+      },
+      "calculationType": "FLAT",
+      "value": 5000,
+      "priority": 10,
+      "roundOff": "NEAREST_1",
+      "effectiveFrom": "2008-07-30"
+    }
+  ]
+}
