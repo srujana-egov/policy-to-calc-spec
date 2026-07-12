@@ -41,7 +41,8 @@ flowchart TD
     S7 -->|passes| S8
     S8["8. Simulate<br/>documented evaluation order,<br/>synthetic payloads — no AI"]:::code --> S9
     S9["9. Business user review<br/>plain-language rules + assumptions<br/>+ worked examples"]:::human
-    S9 -->|correct it| S6
+    S9 -->|"correct a synthesis judgment call<br/>(boundary, effective date, naming)"| S6
+    S9 -->|"correct a misread from the source doc<br/>(wrong grouping, wrong amount)"| S4
     S9 -->|approve| GATE
     GATE["Confirmation gate<br/>(show literal endpoint+params,<br/>human YES/NO)"]:::notbuilt --> WRITE
     WRITE["POST /{module}/rules<br/>on the real Calculation Engine<br/>+ audit log entry"]:::notbuilt
@@ -58,6 +59,16 @@ Yellow = partially built. Grey/dashed = designed but not built.
 
 Only 3 of these 9 steps actually call an LLM (Pass A analyze, Pass B extract, Synthesize) — the
 rest are either plain deterministic code or not yet built.
+
+**A human's rebuttal only ever happens at step 9, after simulate — and it routes to one of two
+different places depending on what kind of correction it is (§4 has the full reasoning):** a
+disagreement with a *judgment call* Synthesize made (a boundary interpretation, an effective date)
+loops back to step 6 only; a disagreement about something Pass A/B actually *misread from the
+document itself* (wrong trade grouping, wrong amount) has to loop back further, to step 4, since
+Synthesize never sees the original document and can't fix a mistake it was never shown. **There is
+currently no mechanism to tell which kind a given correction is, or route it automatically** — that
+distinction has to be figured out by whoever builds the review screen, not something the pipeline
+already handles.
 
 ## 4. Structured outputs, and why `PolicyRule[]` looks the way it does
 
@@ -149,6 +160,34 @@ answer this before anything proceeds." The *designed* version (the reasoning beh
 coloring on this step) would add exactly that structure, e.g. `{text: str, tier: "cosmetic" |
 "confirm" | "blocking"}` — today it's flat text, which is precisely the gap the yellow color in
 §3's diagram is flagging, not a cosmetic style choice.
+
+**Where a business user can actually act on any of this, and how a correction would get
+processed:** only at step 9 (§3), after simulate — nowhere earlier. That's a deliberate choice, not
+an oversight: showing the *worked example* alongside an assumption is what makes it judgeable by a
+non-technical reviewer. "Should '>1000 sq.ft.' be inclusive or exclusive" is hard to answer in the
+abstract; "a shop at exactly 1,000 sq.ft. pays ₹2,000 — is that right?" is answerable. The
+trade-off, worth stating plainly: if the reviewer rejects something, all of validate and
+simulate's work was based on a guess that turned out wrong, and reruns.
+
+Mechanically, a correction reuses the exact pattern already built and proven for `synthesize.py`'s
+validation-failure retry — a multi-turn message history, where the prior draft is added back as an
+`"assistant"` turn and the correction as a new `"user"` turn, then Synthesize runs again:
+```python
+messages.append({"role": "assistant", "content": result.model_dump_json()})
+messages.append({"role": "user", "content": "<the correction> — fix this and return a corrected CalculationRuleSet."})
+```
+That part is a small, well-understood extension of code that already exists, not new architecture.
+
+**The part that isn't figured out at all: which of two different things a correction actually
+is.** A rebuttal that's really about a *synthesis judgment call* (the boundary interpretation, the
+effective date, a naming choice) correctly loops back to Synthesize (step 6) alone — Synthesize can
+fix its own judgment call. A rebuttal about something Pass A/B *misread from the source document
+itself* (claiming 47 trades share a fee when trade #12 actually differs, say) cannot be fixed by
+looping back to Synthesize, because Synthesize only ever sees the already-wrong `PolicyRule`, never
+the original document — it has to loop back to step 4 (Extract) instead, with the correction as
+added context, and flow all the way forward again. **Nothing today distinguishes which kind of
+correction a human just gave, or routes it to the right stage automatically** — that's a real,
+unaddressed design gap, not a detail the current pipeline quietly handles.
 
 **What "grounded in the vocabulary reference" means, mechanically:** not fine-tuning, not a
 retrieval/vector-search step — the entire text of `reference/calculation-rule-vocabulary.md` gets
@@ -303,8 +342,9 @@ flowchart TD
     S8D --> WFREVIEW["Workflow Service:<br/>state -> PENDING_FOR_REVIEW"]
     WFREVIEW --> SEARCHAPI["Existing platform search API<br/>answers 'what's pending my review'<br/>— no new code"]
     SEARCHAPI --> S9D["9. Business user review"]:::human
-    S9D -->|request correction| WFCORRECT["Workflow Service:<br/>state -> NEEDS_CORRECTION"]
-    WFCORRECT -->|loops back, natively| S6D
+    S9D -->|"request correction<br/>(synthesis judgment call or<br/>source-document misread — see §4)"| WFCORRECT["Workflow Service:<br/>state -> NEEDS_CORRECTION"]
+    WFCORRECT -->|"judgment call"| S6D
+    WFCORRECT -->|"document misread"| S4D
     S9D -->|approve| WFAPPROVE["Workflow Service:<br/>state -> APPROVED"]
 
     WFAPPROVE --> MCPTOOL["MCP tool call<br/>(createCalculationRule)"]
