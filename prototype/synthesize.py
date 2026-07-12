@@ -1,15 +1,13 @@
-"""Stage 4: Rule Synthesis & Validation. Maps PolicyRule[] -> CalculationRule[] via Claude's
-structured outputs, then runs the *deterministic* validator (validate.py) against the real
-schema's business rules. If validation fails, one reflection pass is sent back to the model with
-the concrete errors (the "reflection-guardrail" pattern) — not a full self-consistency ensemble,
-which would be overkill for this scale. Requires ANTHROPIC_API_KEY in the environment.
+"""Stage 4: Rule Synthesis & Validation. Maps PolicyRule[] -> CalculationRule[] via structured
+outputs, then runs the *deterministic* validator (validate.py) against the real schema's business
+rules. If validation fails, one reflection pass is sent back to the model with the concrete
+errors (the "reflection-guardrail" pattern) — not a full self-consistency ensemble, which would
+be overkill for this scale. Requires ANTHROPIC_API_KEY or OPENAI_API_KEY (see llm_client.py).
 """
 
-import json
 from pathlib import Path
 
-from anthropic import Anthropic
-
+from llm_client import structured
 from models import CalculationRuleSet
 from validate import validate_rule_set
 
@@ -33,21 +31,13 @@ Vocabulary reference:
 
 
 def synthesize(policy_rules_json: str, max_reflection_passes: int = 1) -> CalculationRuleSet:
-    client = Anthropic()
     vocab = VOCAB_PATH.read_text()
     system = SYSTEM_PROMPT.format(vocab=vocab)
 
     messages = [{"role": "user", "content": f"PolicyRules to map:\n\n{policy_rules_json}"}]
 
     for attempt in range(max_reflection_passes + 1):
-        response = client.messages.parse(
-            model="claude-sonnet-5",
-            max_tokens=4096,
-            system=system,
-            messages=messages,
-            output_format=CalculationRuleSet,
-        )
-        result: CalculationRuleSet = response.parsed_output
+        result: CalculationRuleSet = structured(system, messages, CalculationRuleSet)
         rules_as_dicts = [r.model_dump(by_alias=True, exclude_none=True) for r in result.rules]
         errors = validate_rule_set(rules_as_dicts)
 

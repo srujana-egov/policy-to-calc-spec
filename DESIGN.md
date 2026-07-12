@@ -142,21 +142,46 @@ the extraction step anyway (see Stage 2 below).
 
 ## Pipeline
 
+Color key: **purple = sent to an LLM**, **blue = plain deterministic code, zero AI**, **orange =
+a human's judgment call**, **dashed/grey = designed but not built**.
+
+```mermaid
+flowchart TD
+    DOC["Policy document<br/>(PDF/questionnaire/etc.)"] --> S1
+
+    S1["1. Ingest<br/>PDF/table extraction"]:::notbuilt --> S2
+    S2["2. Locate relevant spans<br/>find the fee-relevant text,<br/>discard the rest"]:::notbuilt --> S3
+
+    S3["3. Pass A — Analyze<br/>read the WHOLE document,<br/>cross-reference tables vs narrative,<br/>flag external references"]:::ai --> S4
+    S4["4. Pass B — Extract<br/>guaranteed-valid PolicyRule[]<br/>(structured output)"]:::ai --> S5
+
+    S5["5. Ambiguity list<br/>assumptions + confidence<br/>(flat list today — the designed<br/>3-tier split isn't built)"]:::partial --> S6
+
+    S6["6. Synthesize<br/>PolicyRule[] → CalculationRule[]<br/>(structured output, grounded in<br/>the vocabulary reference)"]:::ai --> S7
+
+    S7{"7. Validate<br/>checks the real schema's<br/>x-businessRules — no AI"}:::code
+    S7 -->|fails, 1 retry| S6
+    S7 -->|passes| S8
+
+    S8["8. Simulate<br/>documented evaluation order,<br/>synthetic payloads — no AI"]:::code --> S9
+
+    S9["9. Business user review<br/>plain-language rules + assumptions<br/>+ worked examples"]:::human
+    S9 -->|correct it| S6
+    S9 -->|approve| GATE
+
+    GATE["Confirmation gate<br/>(AI-fying-DIGIT pattern:<br/>show literal endpoint+params,<br/>human YES/NO)"]:::notbuilt --> WRITE
+    WRITE["POST /{module}/rules<br/>on the real Calculation Engine<br/>+ audit log entry"]:::notbuilt
+
+    classDef ai fill:#e8d9f7,stroke:#6a3fa0,color:#1a1a1a
+    classDef code fill:#cfe3fb,stroke:#1b4d89,color:#1a1a1a
+    classDef human fill:#fbe3c9,stroke:#a15b00,color:#1a1a1a
+    classDef partial fill:#fff3c4,stroke:#a17f00,color:#1a1a1a
+    classDef notbuilt fill:#eeeeee,stroke:#888888,color:#555555,stroke-dasharray: 5 5
 ```
-[Policy Doc] → 1. Ingest → 2. Extract & Normalize → 3. Ambiguity Detection
-                                                            │
-                                              ┌─────────────┴─────────────┐
-                                     [confident: proceed]        [material: ask business user]
-                                                            │
-                                                            ▼
-                                            4. Rule Synthesis & Validation
-                                                            │
-                                                            ▼
-                                       5. Synthetic Payload + Simulated Estimate
-                                                            │
-                                                            ▼
-                                          6. Business User Review → Approve/Edit
-```
+
+Note the two loops: Step 7 can send work back to Step 6 automatically (one bounded retry, no
+human involved — the reflection-guardrail pattern). Step 9 sending work back to Step 6 is a
+*human's* correction — that loop is designed but the confirmation UI it depends on isn't built.
 
 ### 1. Ingest
 - PDF/table extraction. Example A is a scanned/typeset table, bilingual Tamil+English — table

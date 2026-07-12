@@ -1,27 +1,27 @@
 """Stage 2: Extract & Normalize. Two passes, not one:
 
-Pass A (client.messages.create, free text): read the WHOLE document and reason about it before
-committing to any structure — find every fee-relevant table, actively search for narrative
-sentences elsewhere in the document that describe fee methodology (not just the first table
-found), cross-reference the two, and flag anything that points at an external document this
-model can't see. This is deliberately modeled on how this pipeline's design conversation actually
-worked: reading the Chennai PDF's merged-cell table correctly, and cross-referencing Bissau's
-scattered narrative confirmations against its fee tables, both happened via free-form reasoning
-across a whole document — not a single constrained extraction call.
+Pass A (free text): read the WHOLE document and reason about it before committing to any
+structure — find every fee-relevant table, actively search for narrative sentences elsewhere in
+the document that describe fee methodology (not just the first table found), cross-reference the
+two, and flag anything that points at an external document this model can't see. This is
+deliberately modeled on how this pipeline's design conversation actually worked: reading the
+Chennai PDF's merged-cell table correctly, and cross-referencing Bissau's scattered narrative
+confirmations against its fee tables, both happened via free-form reasoning across a whole
+document — not a single constrained extraction call.
 
-Pass B (client.messages.parse, structured output): given Pass A's analysis as grounding, extract
-PolicyRule[] in the guaranteed-conformant shape. Structured outputs and extended thinking are not
-compatible on the same call (confirmed against current docs) — this two-pass split is how you get
-both: real reasoning room in Pass A, guaranteed-valid JSON in Pass B.
+Pass B (structured output): given Pass A's analysis as grounding, extract PolicyRule[] in the
+guaranteed-conformant shape. Structured outputs and extended thinking are not compatible on the
+same call (confirmed against current docs) — this two-pass split is how you get both: real
+reasoning room in Pass A, guaranteed-valid JSON in Pass B.
 
-Requires ANTHROPIC_API_KEY in the environment. Usage: python extract.py [source_file] [--schedule SCHEDULE-I]
+Requires ANTHROPIC_API_KEY or OPENAI_API_KEY in the environment (see llm_client.py — whichever is
+set is used). Usage: python extract.py [source_file] [--schedule SCHEDULE-I]
 """
 
 import sys
 from pathlib import Path
 
-from anthropic import Anthropic
-
+from llm_client import free_text, structured
 from models import PolicyExtraction
 
 DEFAULT_SOURCE = Path(__file__).parent.parent / "fixtures" / "chennai-trade-license-schedule.md"
@@ -68,30 +68,21 @@ classification system exists, so no category condition should be added anywhere"
 Only extract what the analysis actually found — do not invent trade names or amounts."""
 
 
-def analyze(client: Anthropic, document_text: str, schedule_filter: str | None) -> str:
+def analyze(document_text: str, schedule_filter: str | None) -> str:
     instruction = "Analyze this document" + (f", focusing on {schedule_filter}" if schedule_filter else "")
     instruction += f":\n\n{document_text}"
-    response = client.messages.create(
-        model="claude-sonnet-5",
-        max_tokens=4096,
-        system=ANALYSIS_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": instruction}],
-    )
-    return "".join(block.text for block in response.content if block.type == "text")
+    return free_text(ANALYSIS_SYSTEM_PROMPT, instruction)
 
 
-def extract(client: Anthropic, document_text: str, analysis: str, schedule_filter: str | None) -> PolicyExtraction:
+def extract(document_text: str, analysis: str, schedule_filter: str | None) -> PolicyExtraction:
     instruction = f"Analysis:\n{analysis}\n\nOriginal document:\n{document_text}"
     if schedule_filter:
         instruction += f"\n\nOnly extract PolicyRules for {schedule_filter}."
-    response = client.messages.parse(
-        model="claude-sonnet-5",
-        max_tokens=4096,
-        system=EXTRACTION_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": instruction}],
-        output_format=PolicyExtraction,
+    return structured(
+        EXTRACTION_SYSTEM_PROMPT,
+        [{"role": "user", "content": instruction}],
+        PolicyExtraction,
     )
-    return response.parsed_output
 
 
 def main():
@@ -104,13 +95,12 @@ def main():
     source_path = Path(args[0]) if args else DEFAULT_SOURCE
 
     document_text = source_path.read_text()
-    client = Anthropic()
 
     print("Pass A: analyzing whole document...")
-    analysis = analyze(client, document_text, schedule_filter)
+    analysis = analyze(document_text, schedule_filter)
     print(analysis)
     print("\nPass B: structured extraction, grounded in the analysis above...")
-    result = extract(client, document_text, analysis, schedule_filter)
+    result = extract(document_text, analysis, schedule_filter)
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(result.model_dump_json(indent=2))
