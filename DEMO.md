@@ -677,9 +677,76 @@ final rule.
    injection, on a schedule, the same way the evaluation benchmark (§13) should test accuracy.
    Treat injection resistance as something measured over time, not assumed from a design doc.
 
+### Other AI attack patterns considered — including the ones that genuinely don't apply here
+
+Worth being precise about which known LLM risk patterns are real for this pipeline and which
+aren't, rather than padding the list with generic AI-security boilerplate:
+
+- **Insecure output handling — real, and currently unaddressed.** If the (not yet built) review
+  screen is a web UI that renders model output directly (a trade name, an assumption sentence), and
+  a document contains something like a trade name crafted as `<script>...</script>`, Pass A/B would
+  faithfully extract it verbatim (that's their job) and a naive UI could render it unescaped — a
+  standard stored-XSS pattern, just arriving via a policy document instead of a web form. Standard
+  fix: escape all model-derived text on render, same as any other user-influenced content — this
+  needs to be a requirement on whoever builds the review screen, not an assumption that AI output
+  is somehow safer than user input.
+- **Excessive agency — low risk, by design, not by luck.** A lot of LLM-security guidance centers
+  on agents that can autonomously call tools and take actions. This pipeline deliberately isn't
+  that (§4) — the model only ever drafts data; a deterministic validator and a human confirmation
+  gate sit between any draft and anything real happening. That's a direct, structural benefit of
+  the "roles, not agents" decision in §4, not a separate mitigation bolted on afterward.
+- **Data/training poisoning — not applicable.** This pipeline uses stock models via API, with no
+  fine-tuning (§3, Architecture A) and no persistent memory across documents. There's no training
+  data for anything to poison, and nothing learned from one document carries into the next.
+
 **The honest bottom line:** there's no way to make an LLM immune to injected instructions in its
 input — that's a property of the current generation of these models, not a bug specific to this
 pipeline. The real mitigation is defense in depth: structured outputs constrain the shape, the
 mitigations above narrow what a successful injection could actually achieve, and the confirmation
 gate remains the backstop underneath all of them — a determined attempt has to beat several
 independent checks, not just one.
+
+## 15. Scale and dependency concerns
+
+Different in kind from §14 — these aren't adversarial attacks, they're what happens as ordinary
+usage grows, and what this pipeline is standing on that it doesn't control.
+
+### Scale
+
+- **Concurrency isn't designed for yet.** The pipeline as built runs one document at a time,
+  synchronously. If several admins across several tenants upload documents at once, there's no
+  queueing or backpressure — just whatever the LLM provider's own rate limits allow. A real
+  deployment needs a queue (workers pulling jobs), not many simultaneous direct calls, before this
+  serves more than a handful of concurrent users.
+- **Cost scales linearly with volume, and needs a monitoring/cap plan.** §12 already shows
+  single-digit cents per document at current pricing — fine at UAT scale, but thousands of
+  documents a month across many tenants turns that into a real budget line that should have an
+  alert or a hard cap, not just a number in a design doc.
+- **Multi-tenant isolation gets harder to guarantee as tenant count grows.** One request handled
+  incorrectly (a bug, not malice) could in principle mix one tenant's document content into
+  another's processing — the more tenants, the more surface area for that specific mistake. Worth
+  an explicit isolation test, not just an assumption that tenant-scoping "just works."
+- **The vocabulary reference and prompts will grow as more calculation patterns get covered** (the
+  coverage gap already named elsewhere — rebates, tax stacks, formulas). Current context windows
+  are large enough that this isn't an immediate ceiling, but an ever-growing prompt diluting the
+  model's focus on what matters most is a real long-term risk to monitor, not a one-time concern.
+
+### Dependencies
+
+- **Single-vendor dependency for the core capability.** Everything in Steps 3-4-6 depends on one
+  LLM provider's API being up, secure, and unchanged in behavior. The provider-agnostic layer
+  already built (either major provider's key works) reduces *lock-in* but doesn't reduce
+  *dependency* — if the active provider has an outage or an incident, this pipeline's AI-driven
+  steps stop working regardless of which provider it happens to be.
+- **Model version drift.** LLM providers periodically deprecate old model versions and ship new
+  ones under the same or a similar name. Prompts tuned against one model's behavior (as these were,
+  conversationally, against one specific model) can silently perform differently after a forced or
+  unnoticed upgrade. This is exactly why the missing evaluation benchmark (§13) matters beyond
+  accuracy alone — without it, a model migration has no way to confirm quality didn't regress.
+- **Calculation Engine schema dependency.** Already named in §13 as "prompt/schema drift" — worth
+  repeating here specifically as a dependency: this pipeline is only as correct as its vocabulary
+  reference's fidelity to a schema owned and evolved elsewhere, with nothing today that detects
+  drift automatically.
+- **Ordinary software supply chain.** Standard dependencies (the provider SDKs, `pydantic`, etc.)
+  carry the same risk any Python project has from its package ecosystem — not AI-specific, but
+  real, and worth the same hygiene (pinned versions, periodic updates) as any other service.
