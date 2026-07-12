@@ -145,63 +145,150 @@ tool-calling, coordinating via message-passing. Rejected: unnecessary coordinati
 risk for a task whose steps don't need to be decided at runtime.
 
 ### C. DIGIT-native / production-integrated (recommended once this needs production guarantees)
-Same core pipeline as (A), wrapped with: the platform's own workflow service for the
-review/approval lifecycle (persistent, queryable, RBAC'd state; the human-correction loop modeled
-as a native cycle, e.g. a state like `NEEDS_CORRECTION` looping back to `PENDING_FOR_REVIEW`);
-master-data service for trade/category classification (if that path is chosen over extending the
-Calculation Engine's condition schema — see §9); the platform's API gateway for token-forwarded
-auth; MCP wrapping the validate/simulate (and possibly extract/synthesize) steps as tools; the
-platform's existing AI confirmation-gate and audit-log pattern reused rather than reinvented.
-**Only worth the setup cost once this handles real production billing — not for a UAT pilot.**
+
+Same core pipeline as (A) — nothing about the extract/synthesize/validate/simulate logic
+changes. What changes is everything *around* it: instead of a plain status table and a script,
+the admin's upload, the review/approval lifecycle, and the eventual write are each handled by an
+existing platform service instead of custom code.
+
+```mermaid
+flowchart TD
+    ADMIN["Admin uploads document"] --> KONG["API Gateway<br/>(auth, RBAC, forwards the<br/>admin's own token — never<br/>a service account)"]
+    KONG --> WFNEW["Workflow Service:<br/>create request, state = DRAFT_GENERATED"]
+    WFNEW --> PIPELINE["Same core pipeline as Architecture A<br/>(Extract -> Synthesize -> Validate -> Simulate)<br/>— unchanged"]
+    MDMS["Master Data Service<br/>(trade-name -> category mapping,<br/>only if that path is chosen — see §8)"] -.-> PIPELINE
+
+    PIPELINE -->|passes validation| WFREVIEW["Workflow Service:<br/>state -> PENDING_FOR_REVIEW"]
+    PIPELINE -->|fails after 1 retry| WFFAIL["Workflow Service:<br/>state -> FAILED_VALIDATION<br/>(routed to a developer)"]
+
+    WFREVIEW --> SEARCHAPI["Existing platform search API<br/>answers 'what's pending my review'<br/>— no new code"]
+    SEARCHAPI --> REVIEWUI["Review screen (still to be built)"]
+    REVIEWUI -->|request correction| WFCORRECT["Workflow Service:<br/>state -> NEEDS_CORRECTION"]
+    WFCORRECT -->|loops back, natively| PIPELINE
+    REVIEWUI -->|approve| WFAPPROVE["Workflow Service:<br/>state -> APPROVED"]
+
+    WFAPPROVE --> MCPTOOL["MCP tool call<br/>(createCalculationRule)"]
+    MCPTOOL --> GATE["Confirmation Gate<br/>(literal endpoint+params shown,<br/>human YES/NO — reused, not new)"]
+    GATE -->|confirmed| CALCENGINE["Calculation Engine:<br/>POST /{module}/rules"]
+    CALCENGINE --> AUDITLOG["Audit Log<br/>(same deterministic writer<br/>every AI-driven write uses)"]
+```
+
+**What's genuinely new work here vs. reused:** the workflow's state/action config (new, but ~50
+lines of config, not custom code — see the worked example in §8), the review screen (new, not
+avoidable in any architecture), and the MDMS mapping (new, only if that path is chosen). The
+gateway, the confirmation gate, MCP tooling, and the audit log are **existing platform
+infrastructure, not built for this project** — this architecture's whole value proposition is
+paying only for the new config, not rebuilding the plumbing around it.
+
+**Only worth the setup cost once this handles real production billing — not for a UAT pilot**,
+where Architecture A's plain status table does the same job for far less setup.
 
 ## 8. DIGIT services: where they genuinely help, and where they don't
 
-An earlier internal proof (built for a different DIGIT service, Public Grievance Redressal)
-already established that general-purpose automation/data-integration tools are not stateful
-business-process engines — no persistent per-entity queryable state, no loops without node
-duplication, no per-step RBAC, no SLA enforcement, short/configurable audit retention far below
-government requirements. That same reasoning applies here, honestly, in both directions:
+**Background finding this builds on:** an earlier internal proof (built for a different DIGIT
+service, Public Grievance Redressal) already established that general-purpose automation/data-
+integration tools are not stateful business-process engines — no persistent per-entity queryable
+state, no loops without node duplication, no per-step RBAC, no SLA enforcement, short/configurable
+audit retention far below government requirements. The table below applies that same honest test
+— "does this specific piece of the project actually need what this service provides, right now" —
+to every candidate DIGIT service, not just the ones that make an easy case.
 
-- **Helps, and not a stretch:** the platform's own workflow service, *if and only if* this is
-  deployed on top of existing platform infrastructure and needs production-grade RBAC/audit — see
-  Architecture C. **Does not help right now**, given the pilot stage is UAT — the setup cost buys
-  guarantees UAT doesn't need yet, and a plain status table is the honest right-sized choice today.
-- **Genuinely helps:** the platform's master-data service, for the trade-name → category mapping
-  discussed in §9 — this is the literal mechanism one of the two schema-gap resolution options
-  already names, not a forced fit.
-- **Minor, optional fits:** the platform's ID-generation service (proper request IDs) and
-  notification service (alerting a reviewer) — convenient, not load-bearing.
-- **Explicitly not needed:** a separate long-running workflow orchestration engine for the
-  human-wait/loop step — once the platform's own workflow service is in the picture (Architecture
-  C), adding a second orchestration engine on top would just be two systems doing the same job.
-- **Explicitly not a fit regardless of stage:** forcing the master-data service to store the
-  actual `CalculationRule` specs themselves (that's the Calculation Engine's job, not reference
-  data), and forcing the workflow service onto a deployment that doesn't already run the platform
-  underneath it.
+| DIGIT service | Would it help this project? | Why / why not | When to actually add it |
+|---|---|---|---|
+| **Workflow service** (state machine, e.g. used for PGR) | Yes, but not yet | The review/approve/correct lifecycle (§7C) is structurally identical to a PGR-style process: states, a loop, RBAC on who can approve, a long audit trail. But UAT stakes don't require any of that yet. | Once this moves toward production billing — see Architecture C |
+| **Master Data Service (MDMS)** | Yes, now | It's the literal mechanism named as one of two ways to close the trade-classification gap (§ open questions) — not a forced fit, an already-identified option | As soon as that classification path is chosen over extending the Calculation Engine's schema |
+| **API Gateway** | Yes, always | Any real deployment needs auth/RBAC at the edge regardless of architecture — this isn't optional infrastructure, it's baseline | From day one of any real (non-local) deployment |
+| **MCP tooling** | Yes, once there's a real service to protect | Turns validate/simulate (and the eventual real write) into governed, auditable tool calls instead of ad hoc function calls | Once this talks to a real Calculation Engine instance, not local JSON files |
+| **Confirmation gate + audit log** | Yes, once writes are real | Same reasoning as MCP — there's nothing to gate or audit while output is just a local JSON file | Same trigger as MCP tooling |
+| **ID-generation service** | Minor, optional | Gives proper request IDs instead of inventing an ad hoc scheme | Convenient anytime, not blocking |
+| **Notification service** | Minor, optional | Pings a reviewer that something's waiting | Convenient anytime, not blocking |
+| **A second orchestration engine** (on top of the workflow service) | **No** | Once the workflow service owns the wait/loop/state need, a second orchestrator on top is two systems doing the same job | Never, once Architecture C is in place |
+| **MDMS for storing the actual `CalculationRule` specs** | **No** | That's the Calculation Engine's own job — MDMS is reference/master data, not transactional rule storage | Never — this would be the wrong abstraction, not a maturity question |
+| **Workflow service on a deployment with no platform underneath it** | **No** | Forces a heavy platform dependency onto a context that may not have or want one (e.g. a lean standalone SaaS deployment) | Only if that deployment model is explicitly chosen — see open question on deployment model |
 
 ## 9. Where this fits the platform's broader AI architecture, and where MCP sits
 
-The platform's existing AI architecture vision (documented separately) is built around: an MCP
-tool layer auto-generated from each service's own API spec, a lightweight non-AI confirmation
-gate intercepting every write (Redis-backed, shows the literal endpoint+params, human YES/NO), a
-deterministic audit log, and an orchestration engine used only as a sequencer over the same tools
-the interactive path already calls — never a second write path. Retrieval-augmented generation in
-that architecture is scoped to documentation Q&A only, and doesn't apply here.
+**The existing pattern, in one picture** (how the platform's AI architecture already handles
+*any* AI-driven write today, e.g. a chat interface creating a record):
 
-This project fits that pattern on three axes directly: the deterministic validate/simulate steps
-should be exposed as MCP tools generated from the Calculation Engine's own spec, the same
-naming/mutation-detection conventions already in use elsewhere; the "business user review →
-approve" step (§3, step 9) is exactly the confirmation-gate's shape — AI proposes, a human
-confirms, only then does a write happen; and every confirmed write should land in the same
-audit log the rest of the platform's AI-driven writes use, not a bespoke one.
+```mermaid
+flowchart LR
+    USER["User asks an AI<br/>assistant to do something"] --> LLM["LLM picks a tool<br/>and drafts parameters"]
+    LLM --> MCP["MCP tool<br/>(auto-generated from<br/>the service's own API spec)"]
+    MCP --> GATE{"Confirmation Gate<br/>(no AI — plain Redis-backed check)<br/>shows literal endpoint + params"}
+    GATE -->|human says NO| DROP["Nothing happens"]
+    GATE -->|human says YES| API["The real service API call"]
+    API --> AUDIT["Deterministic audit log"]
+```
 
-**One thing this project is not** yet covered by existing precedent for: everything built so far
-in that architecture assumes specs already exist and AI only *consumes* them as tools. This
-project has AI *generate* a draft spec from an unstructured document in the first place — a new
-capability class for that architecture, not a straightforward reuse of an existing pattern. Worth
-naming explicitly rather than presenting as "just another consumer of existing infrastructure."
+**Where this project's pieces slot into that exact same picture:**
 
-## 10. LLM costs — estimated, not yet measured
+```mermaid
+flowchart LR
+    STEP4["Steps 3-4-6 (Extract/Synthesize)<br/>= the 'LLM drafts parameters' box above"] --> MCP2["validate/simulate exposed<br/>as MCP tools, generated from<br/>the Calculation Engine's own spec"]
+    MCP2 --> GATE2{"Same Confirmation Gate<br/>— step 9 in §3's diagram<br/>IS this box, not a new one"}
+    GATE2 -->|YES| API2["POST /{module}/rules<br/>= the 'real service API call' box"]
+    API2 --> AUDIT2["Same audit log<br/>every other AI-driven write uses"]
+```
+
+Nothing here is a new mechanism — the "business user review → approve" step from §3 *is* the
+confirmation gate, using the same MCP/gate/audit-log machinery already built for every other
+AI-driven write on the platform, not a parallel implementation.
+
+**One genuine gap, worth naming plainly rather than glossing over:** everything built so far in
+that existing architecture assumes a spec already exists, and AI only *consumes* it (picks the
+right tool, fills in the right parameters). This project has AI *generate* a brand-new draft spec
+from an unstructured document in the first place — the "LLM drafts parameters" box above is
+normally a simple parameter-filling task; here it's the entire multi-step reasoning pipeline from
+§3. That's a new capability class for this architecture, not a drop-in reuse of an existing
+pattern — worth presenting as "the first of its kind," not "just another consumer."
+
+## 10. Graceful degradation — this doesn't stop working if AI is down or wrong
+
+**The core claim: only 2 of the 9 pipeline stages in §3 actually depend on AI at all (Pass A,
+Pass B/Extract) plus one more that's AI-assisted but not AI-only (Synthesize).** Validate,
+Simulate, Review, the Confirmation Gate, and the real write have zero AI dependency today —
+`validate.py` and `simulate.py` are plain code that will check and run *any* `CalculationRule`
+JSON handed to them, whether an LLM produced it or a person typed it by hand. AI is an optional
+accelerator sitting in front of an already-AI-independent core — not something the rest of the
+system collapses without.
+
+**The degradation ladder, concretely:**
+
+1. **AI available and confident** → full automation, steps 3-6 run as designed.
+2. **AI available, but the deterministic validator rejects its draft twice** (the one automatic
+   reflection retry already built into `synthesize.py` doesn't resolve it) → don't loop forever
+   or fail silently. Surface the best-effort draft plus the validator's specific errors to a
+   developer, who edits the JSON directly — still faster than drafting from a blank page, and
+   this is already `synthesize.py`'s actual behavior today (it warns and returns rather than
+   crashing).
+3. **AI entirely unavailable** (API down, no key configured, sustained rate-limiting) → skip
+   straight to manual entry of the `PolicyRule` or `CalculationRule` JSON at exactly the point
+   Pass A/B/Synthesize would have produced it — i.e., exactly today's pre-AI developer workflow —
+   and everything downstream (validate, simulate, review, gate, write) runs completely unchanged,
+   because none of it was ever written to assume AI produced its input.
+4. **Transient failures** (timeouts, momentary rate limits) → retry with backoff *before* falling
+   back to step 3, so a brief blip doesn't force a manual detour unnecessarily.
+
+```mermaid
+flowchart TD
+    START["Document ready to process"] --> TRY{"AI available and confident?"}
+    TRY -->|yes| AUTO["Full automation:<br/>Extract -> Synthesize"]
+    TRY -->|transient failure| RETRY["Retry with backoff"] --> TRY
+    TRY -->|down / no key / exhausted retries| MANUAL["Manual entry:<br/>developer drafts the JSON directly<br/>(today's pre-AI workflow)"]
+    AUTO --> VALCHECK{"Validator passes<br/>(1 auto-retry already built in)?"}
+    VALCHECK -->|no, still failing| MANUAL
+    VALCHECK -->|yes| SPINE["Validate -> Simulate -> Review -><br/>Confirmation Gate -> Write<br/>(zero AI dependency, always the same path)"]
+    MANUAL --> SPINE
+```
+
+**The honest gap:** this ladder is the *design* — the individual pieces (retry-then-fallback,
+a manual-entry path) aren't wired together as an explicit, intentional degradation flow yet.
+What's true today is narrower but still meaningful: the "spine" (validate/simulate/review/
+gate/write) already works on any valid `CalculationRule` JSON regardless of its origin, which is
+what makes this degradation path possible to build cheaply rather than a redesign.
+
+## 11. LLM costs — estimated, not yet measured
 
 **Caveat up front: every attempt to run this pipeline against a live API in this environment
 failed on API-key issues, not on the pipeline itself — these are computed estimates from real
@@ -227,7 +314,7 @@ likely still smaller than the engineering cost of building the remaining pieces.
 pricing on at least one provider is time-limited and will roughly increase 1.5x later this year —
 worth re-checking before any cost commitment to a client.
 
-## 11. Other practical concerns
+## 12. Other practical concerns
 
 - **Data privacy / hosting.** Policy documents leave the platform's own environment and go to a
   third-party LLM API. For government fee schedules this is probably low-sensitivity, but this
@@ -237,9 +324,9 @@ worth re-checking before any cost commitment to a client.
   year with a real, dated increase. Building in a provider-agnostic layer (already done in the
   prototype — either major provider's key works) reduces lock-in but doesn't remove the pricing
   risk itself.
-- **API availability during a live review.** No built-in handling yet for what a reviewer sees if
-  the LLM API is down or rate-limited mid-session — worth a defined fallback (queue and retry
-  later, not a hard failure) before this is client-facing.
+- **API availability during a live review.** See §10 for the fallback design — the short version
+  is that the deterministic spine doesn't depend on AI being up, but the retry/fallback ladder
+  itself isn't wired together as a real, tested flow yet.
 - **Prompt/schema drift.** As the Calculation Engine's schema gains new capabilities, the
   vocabulary reference and prompts need active upkeep — nothing currently detects if a prompt
   quietly stops matching the schema.
@@ -255,7 +342,7 @@ worth re-checking before any cost commitment to a client.
   conversational reasoning — not a completed automated run. This is the single most important
   thing to close before treating any of the above as fully proven.
 
-## 12. Open questions for the team
+## 13. Open questions for the team
 
 1. **Trade-classification gap**: extend the Calculation Engine with a "matches any of these named
    values" condition operator, vs. push classification upstream into master data. Only matters for
