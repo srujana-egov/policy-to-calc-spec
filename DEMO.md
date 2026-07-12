@@ -86,6 +86,17 @@ class PolicyRule(BaseModel):
     confidence: float        # 0-1, the model's own signal of how sure it is
 ```
 
+**Based on what, precisely:** not derived from `calculation-engine-3.0.0.yaml` directly — there is
+no `PolicyRule` schema anywhere in that file; it doesn't exist on the real engine's side at all.
+This is a hand-designed intermediate format, informed by two things: (1) knowing what the *target*
+`CalculationRule` schema will eventually need, so mapping onto it later is straightforward rather
+than a leap, and (2) the design principle from §2 — deliberately simpler and flatter than the real
+schema, so a misread is visible in three plain fields instead of buried inside `ruleType`/
+`calculationType`/nested `conditions` objects. If this were instead just a direct dump of whatever
+fields `CalculationRule` has, extraction errors would be exactly as hard to spot as they are today
+when a developer hand-writes the final JSON straight away — the entire point of a separate
+intermediate stage is that it deliberately is *not* the target schema.
+
 Concretely, for the Chennai example in §5:
 
 ```json
@@ -122,6 +133,41 @@ behind keeping extraction and synthesis as two separate stages in §3 — a wron
 sq.ft." is visible and fixable in this small, plain structure, instead of being buried inside a
 `RATE_MATRIX`/`FLAT` object with JSONPath conditions and priority fields already attached. Two
 cheap-to-verify steps beat one hard-to-verify step.
+
+**What the "Ambiguity list" (§3, step 5) actually looks like today:** just `list[str]` — plain
+sentences, no structure at all. Concretely, it's two separate fields on two different objects:
+`PolicyExtraction.documentNotes` (from Pass B — things that don't belong to one specific rule,
+like an unresolved external reference) and `CalculationRuleSet.assumptions` (from Synthesize —
+judgment calls made while mapping onto the real schema, like a boundary interpretation or a
+missing effective date). Verbatim from the real Chennai run:
+```
+"Above 1000 sq.ft." interpreted as area > 1000, not >= 1000 — modeled as from: 1000.01...
+effectiveFrom set to 2008-07-30 (the council resolution date cited in the document header)...
+```
+That's it — no `severity` field, no `tier`, nothing distinguishing "safe to ignore" from "you must
+answer this before anything proceeds." The *designed* version (the reasoning behind §3's yellow
+coloring on this step) would add exactly that structure, e.g. `{text: str, tier: "cosmetic" |
+"confirm" | "blocking"}` — today it's flat text, which is precisely the gap the yellow color in
+§3's diagram is flagging, not a cosmetic style choice.
+
+**What "grounded in the vocabulary reference" means, mechanically:** not fine-tuning, not a
+retrieval/vector-search step — the entire text of `reference/calculation-rule-vocabulary.md` gets
+pasted, verbatim, into the system prompt sent for the Synthesize call, every single time (literally
+`SYSTEM_PROMPT.format(vocab=vocab)` in `synthesize.py`, where `vocab` is that file's full content).
+The model has the complete pattern-lookup table and the "common mistakes to avoid" list sitting
+directly in its context window while it drafts `CalculationRule[]`. "Grounded" here means exactly
+that the reference document is physically present in the prompt — nothing more sophisticated.
+
+**What `x-businessRules` actually is:** a custom field inside `calculation-engine-3.0.0.yaml` — the
+`x-` prefix is the standard OpenAPI convention for a vendor/non-standard extension, used here
+because plain JSON Schema (`type`, `required`, `enum`) has no way to express a rule like *"a
+condition must set either `equals` or `from`/`to`, never both"* or *"`dependsOn` must not
+introduce a cycle across all active rules for a module."* These are plain-English business
+constraints, not machine-checkable schema types. Critically: **nothing in the OpenAPI spec
+enforces these automatically** — they're documentation of rules the real Calculation Engine
+implementation checks at write time. They are the literal source `validate.py` was written from,
+line by line, so the same checks run locally, for free, before anything is ever sent to the real
+engine.
 
 ## 5. Walkthrough — Chennai example (proven, real output)
 
