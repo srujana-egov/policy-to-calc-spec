@@ -115,6 +115,21 @@ Full detail already exists in `DESIGN.md`/`DEMO.md` for the *legacy-document* ve
 pipeline (LLM-based `extract.py`/`synthesize.py`, proven against two real fixtures). This section
 describes the structured-input version discussed and designed in-session, not yet built.
 
+**The pipeline, precisely, end to end:**
+
+> form UI → deterministic mapper → `PolicyRule` → deterministic mapper (the same mapping table
+> `synthesize.py`'s prompt describes today, reimplemented as code, not an LLM call) →
+> `CalculationRule[]` → `validate.py` (business rules) + `simulate.py` (worked examples), both
+> internal, no AI or human involved yet → business user sees **all** the generated rules in plain
+> language + **all** the assumptions + **a few** representative worked examples → approve, or
+> send a correction back.
+
+Worth being precise about the two things that are easy to get slightly wrong here: `synthesize.py`
+*as it exists today* is an LLM call — in this form-based path it's *replaced* by a deterministic
+mapper doing the same job, not reused as-is. And "a few" only describes the worked examples from
+`simulate.py`, deliberately chosen to be answerable rather than exhaustive — the rules and
+assumptions themselves are never trimmed down; the business user sees the complete set of both.
+
 **Why a form instead of a document, for new (not legacy) config:** a well-designed form removes
 the single hardest problem in the legacy pipeline — inferring fee logic from messy prose — by
 resolving that ambiguity at data-entry time instead of inference time. See "why not go directly
@@ -133,8 +148,8 @@ calls:**
   `PolicyRule`'s 9-value enum; condition builder already matches `PolicyCondition`'s shape).
 - `PolicyRule` → `CalculationRule` — the same mapping table currently written as prose in
   `synthesize.py`'s prompt, implementable as a pure function once the input is clean.
-- `validate.py` and `simulate.py` — unchanged; still deterministic regardless of how the
-  `PolicyRule` was produced.
+- `validate.py` and `simulate.py` — unchanged, still deterministic regardless of how the
+  `PolicyRule` was produced, and both run internally, before any human or AI sees the output.
 
 **Why `PolicyRule` stays as an intermediate even with a form (not just an LLM-safety measure):**
 1. `CalculationRule` still isn't reviewable by a business user — someone needs to see a plain
@@ -160,9 +175,10 @@ sharing a module would need an explicit `scheduleCode`/`tradeCategory` condition
 stay distinguishable; the engine offers no help here on its own. (Same gap already named in
 `DESIGN.md`'s "Open schema gap" section, from a different angle.)
 
-**End of the pipeline, same shape as `DESIGN.md`'s Stage 6-9:** business-user review of plain-
-language rules + worked examples → confirmation gate + audit log (not built) → `POST
-/{module}/rules` on the real Calculation Engine (not built).
+**End of the pipeline, same shape as `DESIGN.md`'s Stage 6-9:** business-user review of *all*
+generated rules in plain language, *all* assumptions, and *a few* worked examples (not a subset of
+the rules themselves) → confirmation gate + audit log (not built) → `POST /{module}/rules` on the
+real Calculation Engine (not built).
 
 ## Step 4 — Workflow configuration
 
