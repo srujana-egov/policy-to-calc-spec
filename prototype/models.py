@@ -78,11 +78,6 @@ class PolicyRule(BaseModel):
     confidence: float = Field(ge=0, le=1)
 
 
-class PolicyExtraction(BaseModel):
-    rules: list[PolicyRule]
-    documentNotes: list[str] = []
-
-
 # --- Stage 4 (synthesize.py) target CalculationRule schema ---
 
 class AttributeCondition(BaseModel):

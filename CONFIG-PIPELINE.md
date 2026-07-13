@@ -83,10 +83,11 @@ language a much more tractable input for *this specific* task than it was for St
 **Recommended: a hybrid, not free text alone.** Natural language ("a name, required; an email
 that must look like an email, required; an age between 0 and 150, optional") drafts the schema
 via a small, bounded LLM call, but the draft always lands in a wizard for field-by-field
-confirmation before it's registered — the same "LLM pre-fills, human confirms inside the
-structured surface" pattern already used for Step 3's legacy-document path. This catches the one
-risk natural language still has here: someone forgetting to mark a field `required`, or stating a
-constraint vaguely ("age should be reasonable" — what number, exactly?).
+confirmation before it's registered — "LLM pre-fills, human confirms inside a structured surface,"
+the same principle Step 3 deliberately does *without* an LLM at all, applied here because JSON
+Schema's small closed vocabulary makes the draft step low-risk. This catches the one risk natural
+language still has here: someone forgetting to mark a field `required`, or stating a constraint
+vaguely ("age should be reasonable" — what number, exactly?).
 
 **The wizard, concretely — deterministic, no LLM needed for this half:**
 1. "What do you want to call this field?" → property name
@@ -111,29 +112,31 @@ authoring the schema itself; data entry rides along for free afterward.
 
 ## Step 3 — Calculation Engine pipeline
 
-Full detail already exists in `DESIGN.md`/`DEMO.md` for the *legacy-document* version of this
-pipeline (LLM-based `extract.py`/`synthesize.py`, proven against two real fixtures). This section
-describes the structured-input version discussed and designed in-session, not yet built.
+`DESIGN.md`/`DEMO.md` document an earlier, LLM-based version of this pipeline (`extract.py`/
+`synthesize.py`, proven against two real fixtures — Chennai and Bissau). **That legacy-document
+path is out of scope and removed, not kept as an optional fallback** — both scripts are deleted;
+`DESIGN.md`/`DEMO.md` remain only as a historical record of that earlier design. This project's
+scope is the form-based path below, end to end, with no LLM step anywhere in it except the
+narrow, optional schema-authoring assist described under Step 2.
 
 **The pipeline, precisely, end to end:**
 
-> form UI → deterministic mapper → `PolicyRule` → deterministic mapper (the same mapping table
-> `synthesize.py`'s prompt describes today, reimplemented as code, not an LLM call) →
+> form UI → deterministic mapper → `PolicyRule` → deterministic mapper (the mapping table below,
+> plain code, not an LLM call) →
 > `CalculationRule[]` → `validate.py` (business rules) + `simulate.py` (worked examples), both
 > internal, no AI or human involved yet → business user sees **all** the generated rules in plain
 > language + **all** the assumptions + **a few** representative worked examples → approve, or
 > send a correction back.
 
-Worth being precise about the two things that are easy to get slightly wrong here: `synthesize.py`
-*as it exists today* is an LLM call — in this form-based path it's *replaced* by a deterministic
-mapper doing the same job, not reused as-is. And "a few" only describes the worked examples from
-`simulate.py`, deliberately chosen to be answerable rather than exhaustive — the rules and
-assumptions themselves are never trimmed down; the business user sees the complete set of both.
+Worth being precise about one thing that's easy to get slightly wrong here: "a few" only describes
+the worked examples from `simulate.py`, deliberately chosen to be answerable rather than
+exhaustive — the rules and assumptions themselves are never trimmed down; the business user sees
+the complete set of both.
 
-**Why a form instead of a document, for new (not legacy) config:** a well-designed form removes
-the single hardest problem in the legacy pipeline — inferring fee logic from messy prose — by
-resolving that ambiguity at data-entry time instead of inference time. See "why not go directly
-to `CalculationRule`" below for why `PolicyRule` stays as an intermediate even here.
+**Why a form, period:** a well-designed form removes the single hardest problem the old
+document-extraction pipeline had — inferring fee logic from messy prose — by resolving that
+ambiguity at data-entry time instead of inference time. See "why not go directly to
+`CalculationRule`" below for why `PolicyRule` stays as an intermediate even here.
 
 **The form's field-picker draws from two different registries, for two different reasons:**
 - `GET /registry/v1/schema/{schemaCode}` (Step 2's output) — the real, complete field list.
@@ -142,14 +145,13 @@ to `CalculationRule`" below for why `PolicyRule` stays as an intermediate even h
   under what name/path, to warn before a `409 AttributePath.Conflict` would otherwise catch it
   at write time.
 
-**Once the form's input is structured, most of the pipeline becomes deterministic code, not LLM
-calls:**
+**The pipeline is deterministic code throughout, no LLM calls anywhere:**
 - Form answers → `PolicyRule` — a direct field mapping (mechanism dropdown already matches
   `PolicyRule`'s 9-value enum; condition builder already matches `PolicyCondition`'s shape).
-- `PolicyRule` → `CalculationRule` — the same mapping table currently written as prose in
-  `synthesize.py`'s prompt, implementable as a pure function once the input is clean.
-- `validate.py` and `simulate.py` — unchanged, still deterministic regardless of how the
-  `PolicyRule` was produced, and both run internally, before any human or AI sees the output.
+- `PolicyRule` → `CalculationRule` — the mapping table below, implemented as a pure function, one
+  `if`/`elif` branch per mechanism.
+- `validate.py` and `simulate.py` — both deterministic, both run internally, before any human or
+  AI sees the output.
 
 **Why `PolicyRule` stays as an intermediate even with a form (not just an LLM-safety measure):**
 1. `CalculationRule` still isn't reviewable by a business user — someone needs to see a plain
@@ -159,14 +161,26 @@ calls:**
    mechanism-specific form screens duplicates the same translation logic independently.
 3. It decouples the form from the Calculation Engine's own schema volatility — a `yaml` version
    change means updating one mapper, not redesigning nine form screens.
-4. It's the shared contract between this form and the legacy-document path below — both need to
-   converge on one representation, or the mapping logic forks into two versions.
 
-**The legacy-document path doesn't disappear — it becomes an optional pre-fill, feeding the same
-form:** `extract.py`/`synthesize.py` (already built, proven against the Chennai fixture) draft an
-answer per form field from an existing policy document; a human corrects it *inside the form*;
-everything downstream of that point is the same deterministic path as fresh form entry. This is
-how the LLM pipeline and the form-based pipeline converge on one system instead of two.
+**How the mapper maps each mechanism — the actual translation logic, now that `synthesize.py`
+itself is deleted, this table is the surviving spec for whoever implements the deterministic
+version:**
+
+| `PolicyRule.mechanism` | Becomes in `CalculationRule` |
+|---|---|
+| `FLAT_OR_BANDED` | One `RATE_MATRIX`/`FLAT` rule **per variant**, sharing one `component`. Sequencing-only `referencesComponents` → `dependsOn` alone, never `appliesOn.componentRef`. |
+| `PER_UNIT` / `PER_ITEM_IN_LIST` | `RATE_MATRIX`/`PER_UNIT`, `appliesOn.jsonPath` = `rateAppliesToAttribute`. `PER_ITEM_IN_LIST` additionally sets `scope: SUBENTITY` + `subEntityPath` from `subEntityHint`. |
+| `SLAB` | **One** `RATE_MATRIX` rule, `calculationType: SLAB`, `slabs` built from all variants in order — not one rule per variant. |
+| `PERCENTAGE_OF_COMPONENT` | `TAX` (or `RATE_MATRIX` if not a statutory tax), `calculationType: PERCENTAGE`, `appliesOn.componentRef` + `dependsOn` from `referencesComponents`. |
+| `REBATE_OF_COMPONENT` | `ADJUSTMENT`, `calculationType: FLAT` if `amountIsPercentage` is false, `PERCENTAGE` if true — checked, never defaulted. |
+| `AGGREGATION` | `ruleType: AGGREGATION`, `scope: SUBENTITY`, `aggregateFunction` from `aggregateFunctionHint`, low `priority` (runs before dependents). |
+| `FORMULA` / `TIME_BASED` | `calculationType: FORMULA`, `formulaVariables` built from `valueSources`, `formulaLogic` formalizing `formulaHint` into real JSON Logic. |
+
+Plus, regardless of mechanism: every `appliesOn`/`sourceAttribute`/`formulaVariables` entry gets
+exactly one of `jsonPath` or `componentRef`; conditions may leave `equals`/`from`/`to` all unset
+(presence-only, valid); `module` is set once on `CalculationRuleSet`, never per-rule; every
+non-obvious judgment call (a boundary interpretation, a default `effectiveFrom`) gets written to
+`assumptions`.
 
 **The open question from Step 1, concretely:** if "certificate type" is a category *within* one
 module (e.g. Schedule I vs. Schedule III, both under `trade-license`), the Calculation Engine's
@@ -254,15 +268,13 @@ flowchart TD
         S3REG1["Registry schema"]:::store
         S3REG2["Calc Engine's own<br/>attribute registry"]:::store
         S3FORM --> S3MAP1["Deterministic mapper<br/>form answers -> PolicyRule"]:::code
-        S3MAP1 --> S3MAP2["Deterministic mapper<br/>PolicyRule -> CalculationRule<br/>(same table, now code not LLM)"]:::code
+        S3MAP1 --> S3MAP2["Deterministic mapper<br/>PolicyRule -> CalculationRule<br/>(plain code, no LLM)"]:::code
         S3MAP2 --> S3VAL["validate.py<br/>x-businessRules, no AI"]:::code
         S3VAL -->|fails| S3MAP2
         S3VAL -->|passes| S3SIM["simulate.py<br/>worked examples, no AI"]:::code
         S3SIM --> S3REVIEW["Business user review<br/>(rules + worked examples)"]:::human
         S3REVIEW -->|approve| S3GATE["Confirmation gate + audit log"]:::notbuilt
         S3GATE --> S3WRITE["POST /{module}/rules<br/>on the real Calculation Engine"]:::notbuilt
-
-        LEGACY["Legacy doc path (optional):<br/>extract.py/synthesize.py pre-fill<br/>the SAME form, human corrects it"]:::ai -.->|pre-fills| S3FORM
     end
 
     subgraph STEP4["Step 4 — Workflow configuration"]
@@ -458,9 +470,11 @@ whatever both still miss.
 
 ## Cross-cutting notes
 
-- **Almost everything downstream of the two human-input points (form, wizard) is deterministic
-  code.** The only LLM involvement anywhere in Steps 2–4 is the optional legacy-document pre-fill
-  path into Step 3's form — clearly separated, not load-bearing for the primary path.
+- **Everything downstream of the two human-input points (form, wizard) is deterministic code —
+  Step 3 has no LLM anywhere in it.** The only LLM involvement anywhere in Steps 2–4 at all is the
+  narrow, optional natural-language draft in Step 2's schema authoring — the legacy-document
+  extraction pipeline this project once had (`extract.py`/`synthesize.py`) is out of scope and
+  deleted, not kept as a fallback.
 - **Both tracks end the same way**, deliberately: business-user review → confirmation gate +
   audit log → write to the real service. One safety pattern, applied twice, not two different
   ones.
