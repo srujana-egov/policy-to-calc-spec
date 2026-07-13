@@ -267,6 +267,162 @@ flowchart TD
     classDef parked fill:#f5f5f5,stroke:#999,color:#666,stroke-dasharray: 2 2
 ```
 
+## Worked examples
+
+Both walkthroughs below are full wizard transcripts, question to final output — nothing hand-
+typed as YAML/JSON until the very last step, and every field in the result traces back to a
+specific answer.
+
+### Registry schema wizard — `trade-license-application`
+
+```
+Wizard: "What's the schema code for this entity?"
+You:    "trade-license-application"
+
+Wizard: "What do you want to call this field?"
+You:    "employeeCount"
+Wizard: "What kind of value is it?"
+You:    "Whole number"
+Wizard: "Any minimum or maximum?"
+You:    "Minimum 0"
+Wizard: "Required, or optional?"
+You:    "Required"
+
+Wizard: "Add another field?"
+You:    "Yes — premisesArea, a decimal number, minimum 0, required"
+
+Wizard: "Add another field?"
+You:    "Yes — hasLiquorLicense, yes/no, optional"
+
+Wizard: "Add another field?"
+You:    "Yes — accessories, a list of things"
+Wizard: "What goes inside each item?"
+You:    "type (text, required), quantity (whole number, minimum 0, required)"
+Wizard: "Is 'accessories' itself required, or optional?"
+You:    "Optional"
+
+Wizard: "Add another field?"
+You:    "No, that's all."
+Wizard: shows a summary table + the raw JSON Schema — "does this look right?"
+You:    "Yes."
+```
+
+Deterministically produces (ready for `POST /registry/v3/schema`):
+
+```json
+{
+  "schemaCode": "trade-license-application",
+  "definition": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "employeeCount": { "type": "integer", "minimum": 0 },
+      "premisesArea": { "type": "number", "minimum": 0 },
+      "hasLiquorLicense": { "type": "boolean" },
+      "accessories": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string" },
+            "quantity": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["type", "quantity"]
+        }
+      }
+    },
+    "required": ["employeeCount", "premisesArea"]
+  }
+}
+```
+
+### Workflow wizard — `trade-license-approval`
+
+Built entirely from questions, using the real `ProcessDefinitionInput` shape from `workflow.yaml`:
+
+```
+Wizard: "What's this workflow called, and give it a short code?"
+You:    "Trade License Approval — code trade-license-approval"
+Wizard: "Overall SLA for the whole process?"
+You:    "5 days"
+
+Wizard: "What's the very first thing that happens?"
+You:    "Application is pending review."           -> PENDING_REVIEW, tagged INITIAL
+Wizard: "How long should 'Pending Review' take?"
+You:    "2 days"
+Wizard: "What can happen from 'Pending Review'?"
+You:    "Approved, sent back for correction, or rejected."
+        -> APPROVE, RETURN (new state), REJECT (new state) queued
+
+Wizard: "How long should 'Returned' take?"
+You:    "1 day"
+Wizard: "What can happen from 'Returned'?"
+You:    "Resubmit, or withdraw."
+Wizard: "'Resubmit' — a new state, or back to one that already exists?"
+You:    "Back to Pending Review."                   -> RESUBMIT -> PENDING_REVIEW (loop, not new)
+        -> WITHDRAW -> a new state, WITHDRAWN, queued
+
+Wizard: "What can happen from 'Approved'?"  You: "Nothing, that's the end."
+Wizard: "Good outcome or bad?"              You: "Good."   -> TERMINAL_SUCCESS
+
+Wizard: "What can happen from 'Rejected'?"  You: "Nothing."
+Wizard: "Good outcome or bad?"              You: "Bad."    -> TERMINAL_FAILURE
+
+Wizard: "What can happen from 'Withdrawn'?" You: "Nothing."
+Wizard: "Good outcome or bad?"              You: "Bad."    -> TERMINAL_FAILURE
+
+Wizard: renders the diagram, "does this look right?"   You: "Yes."
+```
+
+Deterministically produces (ready for `POST /process/definition`):
+
+```yaml
+code: trade-license-approval
+name: Trade License Approval
+sla: 432000000
+states:
+  - code: PENDING_REVIEW
+    name: Pending Review
+    type: INITIAL
+    sla: 172800000
+    actions:
+      - { code: APPROVE, label: Approve, nextState: APPROVED }
+      - { code: RETURN,  label: Return for Correction, nextState: RETURNED }
+      - { code: REJECT,  label: Reject, nextState: REJECTED }
+  - code: RETURNED
+    name: Returned
+    type: INTERMEDIATE
+    sla: 86400000
+    actions:
+      - { code: RESUBMIT, label: Resubmit, nextState: PENDING_REVIEW }
+      - { code: WITHDRAW, label: Withdraw, nextState: WITHDRAWN }
+  - code: APPROVED
+    name: Approved
+    type: TERMINAL_SUCCESS
+    actions: []
+  - code: REJECTED
+    name: Rejected
+    type: TERMINAL_FAILURE
+    actions: []
+  - code: WITHDRAWN
+    name: Withdrawn
+    type: TERMINAL_FAILURE
+    actions: []
+```
+
+### The honest limit both examples share
+
+The wizard forces every *question* to be asked — it cannot force an *answer* to be complete.
+If someone genuinely forgets `accessories` exists, or forgets `RETURNED` has a `WITHDRAW` branch,
+asking "add another field?" or "anything else from here?" doesn't make them remember something
+they never thought of — that's not a wizard-vs-AI-agent problem, it's a limit of depending on one
+person's memory at all. The workflow question is somewhat better protected than the registry one,
+because it's anchored to a specific state already in view ("what else from *here*") rather than a
+completely open prompt — but neither is a guarantee. The real mitigation for *this* class of gap
+is a checklist drawn from similar existing schemas/workflows, or a legacy form/system's field list
+where one exists — giving the person something concrete to check against, not a blank memory to
+search.
+
 ## Cross-cutting notes
 
 - **Almost everything downstream of the two human-input points (form, wizard) is deterministic
