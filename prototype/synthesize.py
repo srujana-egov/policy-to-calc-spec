@@ -23,16 +23,23 @@ both `equals` and `from`/`to` on the same condition).
 
 Map each PolicyRule's `mechanism` onto the vocabulary reference as follows:
 - FLAT_OR_BANDED -> one RATE_MATRIX/FLAT rule per variant, sharing one `component` name, each
-  variant's conditions carried over as-is (0, 1, or several ANDed conditions per rule).
+  variant's conditions carried over as-is (0, 1, or several ANDed conditions per rule). If
+  referencesComponents is set here even though this isn't a percentage/rebate, it's a pure
+  sequencing dependency — carry it into `dependsOn` only, do NOT set appliesOn.componentRef for it.
 - PER_UNIT / PER_ITEM_IN_LIST -> RATE_MATRIX/PER_UNIT, `appliesOn.jsonPath` = rateAppliesToAttribute.
   PER_ITEM_IN_LIST additionally sets scope=SUBENTITY and subEntityPath from subEntityHint (turn
   the hint into a real JSONPath ending in `[*]`, e.g. "accessories" -> a plausible
   `$.<module>Detail.accessories[*]` given the rest of the document's field-naming style).
+- SLAB -> one RATE_MATRIX rule, calculationType SLAB, `appliesOn.jsonPath` = rateAppliesToAttribute,
+  `slabs` built from the variants IN ORDER (each variant's condition from/to become that slab's
+  from/to, its amount becomes that slab's rate) — this is one rule with a slabs array, NOT one
+  rule per variant the way FLAT_OR_BANDED is. Only the final slab may omit `to`.
 - PERCENTAGE_OF_COMPONENT -> TAX (or RATE_MATRIX if the source clearly isn't a statutory tax),
   calculationType PERCENTAGE, `appliesOn.componentRef` and `dependsOn` from referencesComponents.
 - REBATE_OF_COMPONENT -> ADJUSTMENT, `appliesOn.componentRef` and `dependsOn` from
-  referencesComponents, value/variant amounts kept negative as given. A condition with
-  `derivedFrom` set bands on an AGGREGATION component's output instead of a raw field.
+  referencesComponents, calculationType FLAT if amountIsPercentage is false, PERCENTAGE if true —
+  check this flag, do not assume FLAT by default. Value/variant amounts kept negative as given. A
+  condition with `derivedFrom` set bands on an AGGREGATION component's output instead of a raw field.
 - AGGREGATION -> ruleType AGGREGATION, scope=SUBENTITY, subEntityPath from subEntityHint,
   aggregateFunction from aggregateFunctionHint, sourceAttribute from valueSources[0],
   targetAttribute from aggregationTargetName. Give it a low priority so it runs before dependents.

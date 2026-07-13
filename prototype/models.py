@@ -45,15 +45,25 @@ class PolicyRule(BaseModel):
         "FLAT_OR_BANDED",          # a fixed or banded amount; 0, 1, or several simultaneous conditions
         "PER_UNIT",                 # a rate multiplied by one raw numeric field, no repeating array
         "PER_ITEM_IN_LIST",         # charged once per element of a repeating array (accessories, floors, taps)
+        "SLAB",                     # true marginal tiers -- each variant is one tier of the SAME field;
+                                     # every tier that applies contributes its own portion, never just one
+                                     # winning band (this is the #1 mistake the vocabulary reference warns
+                                     # about: do not confuse with FLAT_OR_BANDED)
         "PERCENTAGE_OF_COMPONENT",  # a tax/cess computed as a percentage of another component's amount
-        "REBATE_OF_COMPONENT",      # a rebate/deduction/surcharge adjusting another component, usually negative
+        "REBATE_OF_COMPONENT",      # a rebate/deduction/surcharge adjusting another component
         "AGGREGATION",              # derives one attribute by summing/counting/etc. over a repeating array
         "FORMULA",                  # real math beyond a single rate -- more than one input combined
         "TIME_BASED",               # interest/penalty, typically reading a principal plus a raw time field
     ]
     variants: list[PolicyRuleVariant]
-    referencesComponents: list[str] = []   # components this rule's value or sequencing depends on
-    rateAppliesToAttribute: Optional[str] = None    # raw field the rate multiplies -- PER_UNIT
+    amountIsPercentage: bool = False   # disambiguates REBATE_OF_COMPONENT: a flat deduction (e.g. -500)
+                                       # vs. a percentage deduction (e.g. -10%) -- always True for
+                                       # PERCENTAGE_OF_COMPONENT, meaningful specifically for REBATE_OF_COMPONENT
+    referencesComponents: list[str] = []   # components this rule's value depends on, OR purely a sequencing
+                                            # dependency (e.g. a flat cess still ordered after the base fee,
+                                            # with no value read from it) -- set on any mechanism, not just
+                                            # the component-referencing ones
+    rateAppliesToAttribute: Optional[str] = None    # raw field the rate/tier multiplies -- PER_UNIT, SLAB
     subEntityHint: Optional[str] = None             # e.g. "accessories" -- PER_ITEM_IN_LIST, AGGREGATION
     aggregateFunctionHint: Optional[str] = None     # SUM / COUNT / MAX / MIN / AVG -- AGGREGATION
     aggregationTargetName: Optional[str] = None     # name the aggregated result is stored under -- AGGREGATION

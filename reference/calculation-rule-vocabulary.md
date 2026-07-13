@@ -12,14 +12,15 @@ win — the examples doc illustrates the schema, it doesn't extend it.
 |---|---|
 | Charge the same amount every time | `calculationType: FLAT`, `conditions: {}` |
 | Charge different amounts depending on one field | one `conditions` key, several rule rows sharing a `component` |
-| Charge based on a range (age, count, size) | `from`/`to` in the condition instead of `equals` (`to` inclusive) |
+| Charge based on a range (age, count, size) | `from`/`to` in the condition instead of `equals` (`to` inclusive). Either bound may be omitted for an open-ended range (e.g. `from: 30` with no `to` means "30 and above") |
 | Require several fields to all match | multiple keys in one `conditions` object — always ANDed, no explicit "and" |
 | Charge rate × someField | `calculationType: PER_UNIT`, `appliesOn.jsonPath` |
 | Charge tiered/marginal bands of the same field | `calculationType: SLAB`, `slabs` array — each tier's rate applies only to the portion of the value inside that band, never the whole value |
 | Add a tax/cess on top of a fee | `calculationType: PERCENTAGE`, `appliesOn.componentRef`, `dependsOn: [thatComponent]` |
+| A flat charge that must still be sequenced after another component (e.g. a flat cess after the base fee), without reading that component's value | `dependsOn` naming it, but no `appliesOn.componentRef` — `dependsOn` is a pure ordering hint here, not a signal the rule is a percentage/rebate |
 | Give a rebate/deduction | `ADJUSTMENT` ruleType, negative `value`. Schema-verified: `appliesOn.componentRef` is *always* required when `ruleType: ADJUSTMENT` (not optional) — a rebate always names the component it reduces, and that component must also appear in `dependsOn` |
 | Charge per item in a repeating list (accessories, floors, taps) | `scope: SUBENTITY`, `subEntityPath` — `jsonPath` inside that rule's `conditions`/`appliesOn` becomes relative to one array element |
-| Total up a list into one number | `ruleType: AGGREGATION`, `aggregateFunction: SUM\|COUNT\|MAX\|MIN\|AVG`, `sourceAttribute`, `targetAttribute`, low `priority` (runs first) |
+| Total up a list into one number | `ruleType: AGGREGATION`, `aggregateFunction: SUM\|COUNT\|MAX\|MIN\|AVG`, `sourceAttribute`, `targetAttribute`, low `priority` (runs first). `sourceAttribute` is required even for `COUNT` — it counts sub-entities where that field is present, even though the value itself isn't summed |
 | Band/condition on that derived total | `derivedFrom: <aggregationComponent>` in a condition, instead of `jsonPath` |
 | Do real math (not just a rate) | `calculationType: FORMULA`, `formulaVariables` (each bound via `jsonPath`, `componentRef`, or mixed) + `formulaLogic` (JSON Logic) |
 | Branch inside one formula | JSON Logic `if` inside `formulaLogic` — only when both branches share the same underlying shape; otherwise prefer two plain conditional rules |

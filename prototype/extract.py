@@ -52,25 +52,37 @@ This is reasoning, not the final output — write prose, not JSON."""
 EXTRACTION_SYSTEM_PROMPT = """Using the analysis provided (and the original document for
 reference), extract PolicyRule records — a normalized intermediate format, NOT the final
 CalculationRule schema, that mapping happens in a later stage. For each distinct fee pattern the
-analysis identified, first decide which of these 8 mechanisms it actually is, then fill in only
+analysis identified, first decide which of these 9 mechanisms it actually is, then fill in only
 the fields that mechanism needs:
 
-- FLAT_OR_BANDED: a fixed or banded amount. variants = one row per band, each with 0+ simultaneous
-  conditions (use `equals` for an exact match on a category/boolean, `from`/`to` for a numeric
-  range — never both on the same condition) and the amount for that row. A flat fee with no
-  banding is a single variant with no conditions.
+- FLAT_OR_BANDED: a fixed or banded amount, where exactly ONE matching band's amount applies to
+  the WHOLE value. variants = one row per band, each with 0+ simultaneous conditions (use `equals`
+  for an exact match on a category/boolean, `from`/`to` for a numeric range — never both on the
+  same condition) and the amount for that row. A flat fee with no banding is a single variant with
+  no conditions. Set referencesComponents even here if the source text says this must be computed
+  after another component purely for ordering, without actually reading that component's value
+  (e.g. a flat cess still listed after the base licence fee in a tax/cess stack).
 - PER_UNIT: a rate multiplied by one raw numeric field, no repeating array. Set
   rateAppliesToAttribute to that field's name; variants holds the rate as `amount` (banded rates,
   like "different rate per size range", still use multiple variants here).
 - PER_ITEM_IN_LIST: charged once per element of a repeating array (accessories, floors, taps).
   Set subEntityHint to the array's name and rateAppliesToAttribute to the per-element field the
   rate multiplies; variants' conditions match on per-element attributes (e.g. accessory type).
+- SLAB: true marginal tiers over ONE field — do NOT confuse with FLAT_OR_BANDED. The tell-tale
+  sign: the document describes a rate that applies only to the PORTION of a value within each
+  band, with every band the value reaches contributing its own portion (e.g. "0.5% on the first
+  500,000, 1% on the remainder" — not "pick whichever band matches and apply its rate to the whole
+  amount"). Set rateAppliesToAttribute to the field being tiered; each variant is one tier, with a
+  single condition on that field (from/to = the tier's bounds) and `amount` = that tier's rate.
 - PERCENTAGE_OF_COMPONENT: a tax/cess computed as a percentage of another component's amount. Set
   referencesComponents to the component(s) it reads; variants' amount is the percentage.
-- REBATE_OF_COMPONENT: a rebate/deduction/surcharge adjusting another component, usually a
-  negative amount. Same shape as PERCENTAGE_OF_COMPONENT otherwise. If the condition bands on an
-  already-derived total (not a raw field), set that condition's derivedFrom to the AGGREGATION
-  rule's scheduleId instead of a jsonPath-based from/to.
+  amountIsPercentage is always true here (set it, don't leave the default).
+- REBATE_OF_COMPONENT: a rebate/deduction/surcharge adjusting another component. Set
+  amountIsPercentage explicitly: false if the amount is a flat currency deduction (e.g. -500),
+  true if it's a percentage deduction (e.g. -10%) — these look similar in the source text but are
+  different mechanically, do not default this without checking the actual wording. If the
+  condition bands on an already-derived total (not a raw field), set that condition's derivedFrom
+  to the AGGREGATION rule's scheduleId instead of a jsonPath-based from/to.
 - AGGREGATION: derives one attribute by summing/counting/etc. over a repeating array. Set
   subEntityHint (the array), aggregateFunctionHint (SUM/COUNT/MAX/MIN/AVG), aggregationTargetName
   (what the derived attribute should be called), and valueSources with the one field being

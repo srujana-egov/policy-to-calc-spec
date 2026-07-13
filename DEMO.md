@@ -251,12 +251,13 @@ class PolicyRuleVariant(BaseModel):     # one band-row: simultaneous conditions 
 class PolicyRule(BaseModel):
     scheduleId: str
     tradeNames: list[str]
-    mechanism: Literal["FLAT_OR_BANDED", "PER_UNIT", "PER_ITEM_IN_LIST",
+    mechanism: Literal["FLAT_OR_BANDED", "PER_UNIT", "PER_ITEM_IN_LIST", "SLAB",
                         "PERCENTAGE_OF_COMPONENT", "REBATE_OF_COMPONENT",
                         "AGGREGATION", "FORMULA", "TIME_BASED"]
     variants: list[PolicyRuleVariant]
-    referencesComponents: list[str] = []        # components this reads or must sequence after
-    rateAppliesToAttribute: Optional[str] = None  # PER_UNIT / PER_ITEM_IN_LIST
+    amountIsPercentage: bool = False  # disambiguates REBATE_OF_COMPONENT: flat -500 vs. percentage -10%
+    referencesComponents: list[str] = []        # components this reads, or purely sequences after
+    rateAppliesToAttribute: Optional[str] = None  # PER_UNIT / PER_ITEM_IN_LIST / SLAB
     subEntityHint: Optional[str] = None           # PER_ITEM_IN_LIST / AGGREGATION
     aggregateFunctionHint: Optional[str] = None   # AGGREGATION
     aggregationTargetName: Optional[str] = None   # AGGREGATION
@@ -271,11 +272,16 @@ enough for exactly the flat/banded pattern proven in §7/§8, and nothing else. 
 field-by-field against all 30 examples in the reference vocabulary found that roughly 27 of 30
 had *no field to go in at all* — not an untested gap, a schema gap: a rebate, a tax-on-another-
 component, a per-accessory charge, an aggregation, or a formula each had nowhere to be represented,
-regardless of how well Pass A/B read the document. The `mechanism` field and the fields above are
-the fix — each of the 8 mechanisms maps onto one or more of the 11 tiers in
-`reference/calculation-rule-vocabulary.md`. **This closes the gap at the schema level; it has not
-yet been run live against a document that actually needs anything beyond FLAT_OR_BANDED** — that's
-the next thing to verify, not something to claim as proven by this change alone.
+regardless of how well Pass A/B read the document. A first fix added 8 mechanisms; a second,
+independent re-check against all 30 examples (not a sample) then caught three more real gaps a
+mechanism count alone hides: no distinct `SLAB` mechanism (a true marginal-tier rule would have
+been misrepresented as `FLAT_OR_BANDED` — the vocabulary reference's own #1 listed mistake), no way
+to tell a flat rebate from a percentage rebate (`amountIsPercentage`), and no guidance that a plain
+FLAT_OR_BANDED rule can carry a `referencesComponents` purely for ordering, with no value read from
+it (the cancer-cess-after-license-fee pattern). All three are fixed now. **This is no longer a
+claim: `prototype/test_policy_rule_coverage.py` constructs and validates a `PolicyRule` for each of
+the 30 reference examples individually and passes** (`python test_policy_rule_coverage.py`) — the
+9 mechanisms above are verified to cover the full reference set, not asserted to.
 
 **Based on what, precisely:** not derived from `calculation-engine-3.0.0.yaml` directly — there is
 no `PolicyRule` schema anywhere in that file; it doesn't exist on the real engine's side at all.
@@ -337,7 +343,7 @@ at all (from the trade-license CGST/SGST pattern in `calculation-rule-examples.p
   extraction stage while a real answer to the gap (extend the engine's schema, or resolve
   classification upstream via MDMS, or a lightweight standalone equivalent — see §3A) gets decided.
 - **`mechanism` + `variants`/conditions, kept separate from the final schema's vocabulary** — even
-  expanded to cover all 8 mechanisms, this still isn't `CalculationRule` (no `ruleType` enum
+  expanded to cover all 9 mechanisms, this still isn't `CalculationRule` (no `ruleType` enum
   forcing exact target vocabulary, no raw JSON Logic — `formulaHint` stays plain text at this
   stage). It's a plain, schema-agnostic description of "what kind of pattern this is, what varies,
   and what it costs" — cheap for a human, or the next stage, to sanity-check, because a mistake
@@ -777,11 +783,27 @@ usage grows, and what this pipeline is standing on that it doesn't control.
   another's processing — the more tenants, the more surface area for that specific mistake. Worth
   an explicit isolation test, not just an assumption that tenant-scoping "just works."
 - **The vocabulary reference and prompts will keep growing as real documents surface edge cases**
-  the 30-example reference doesn't cover yet. `PolicyRule` now has a field for every one of the 8
+  the 30-example reference doesn't cover yet. `PolicyRule` now has a field for every one of the 9
   mechanisms in that reference (§6), but coverage of the reference isn't the same as coverage of
   every real document — new patterns will still turn up. Current context windows are large enough
   that this isn't an immediate ceiling, but an ever-growing prompt diluting the model's focus on
   what matters most is a real long-term risk to monitor, not a one-time concern.
+
+  **What actually happens when a new pattern shows up, concretely:** today this is a manual
+  process — a human (so far, this exercise) re-reads the new example, decides whether it fits an
+  existing mechanism or needs a new one, and edits `models.py`/`extract.py`/`synthesize.py` by
+  hand. That will not change on its own. What's worth distinguishing is *what actually forces* a
+  schema change: not every new policy document, since the 30 reference examples are just different
+  phrasings of a finite set of mechanisms (a new document using a rate-per-square-foot needs no
+  code change — `PER_UNIT` already exists). The real trigger is the underlying Calculation Engine's
+  own schema evolving — a rare, deliberate event, not a per-document one. The concrete mitigation
+  already built for this is `prototype/test_policy_rule_coverage.py`, a regression suite with one
+  test per reference example: when the vocabulary grows, the answer to "did we just break
+  something, or does this need a new mechanism" becomes "run the suite and see what's red," not
+  "re-read all 30-plus examples by hand again." Worth naming honestly, though: making `PolicyRule`
+  fully future-proof by mirroring `CalculationRule` structurally would defeat the entire point of
+  having a simpler intermediate format at all (§2). Some ongoing manual re-verification cost is an
+  intentional consequence of that tradeoff, not an oversight to be engineered away.
 
 ### Dependencies
 
