@@ -227,23 +227,55 @@ literally cannot return a malformed shape. This removes an entire class of failu
 missing fields, wrong types) before it can happen, rather than catching it after the fact. That's
 the mechanism behind every purple ("sent to an LLM") box in §5's diagram.
 
-**The actual shape**, as defined and sent to the API:
+**The actual shape**, as defined and sent to the API (expanded from an earlier, narrower version —
+see the coverage note below):
 
 ```python
-class Band(BaseModel):
-    from_: Optional[float]   # aliased to "from" — inclusive lower bound; omitted = unbounded below
-    to: Optional[float]      # inclusive upper bound; omitted = unbounded above
-    amount: float            # the fee for this band
+class PolicyCondition(BaseModel):
+    attributeName: str
+    suggestedJsonPath: str
+    equals: Optional[Any] = None      # exact match — category, boolean, etc.
+    from_: Optional[float] = None     # numeric range, inclusive lower bound (aliased "from")
+    to: Optional[float] = None        # numeric range, inclusive upper bound
+    derivedFrom: Optional[str] = None # bands on another rule's derived output, not a raw field
+
+class PolicyValueSource(BaseModel):    # a named math input — FORMULA / TIME_BASED
+    variableName: str
+    suggestedJsonPath: Optional[str] = None
+    referencesComponent: Optional[str] = None
+
+class PolicyRuleVariant(BaseModel):     # one band-row: simultaneous conditions + what it costs
+    conditions: list[PolicyCondition] = []
+    amount: Optional[float] = None
 
 class PolicyRule(BaseModel):
-    scheduleId: str          # which section of the source document this came from
-    tradeNames: list[str]    # every named item this pattern applies to
-    conditionAttribute: str  # what the fee is banded on, or "none" for a flat fee
-    suggestedJsonPath: str   # a guess at where this lives in a real payload — not authoritative yet
-    bands: list[Band]
-    sourceText: str          # verbatim quote — traceability back to the original document
-    confidence: float        # 0-1, the model's own signal of how sure it is
+    scheduleId: str
+    tradeNames: list[str]
+    mechanism: Literal["FLAT_OR_BANDED", "PER_UNIT", "PER_ITEM_IN_LIST",
+                        "PERCENTAGE_OF_COMPONENT", "REBATE_OF_COMPONENT",
+                        "AGGREGATION", "FORMULA", "TIME_BASED"]
+    variants: list[PolicyRuleVariant]
+    referencesComponents: list[str] = []        # components this reads or must sequence after
+    rateAppliesToAttribute: Optional[str] = None  # PER_UNIT / PER_ITEM_IN_LIST
+    subEntityHint: Optional[str] = None           # PER_ITEM_IN_LIST / AGGREGATION
+    aggregateFunctionHint: Optional[str] = None   # AGGREGATION
+    aggregationTargetName: Optional[str] = None   # AGGREGATION
+    valueSources: list[PolicyValueSource] = []    # FORMULA / TIME_BASED
+    formulaHint: Optional[str] = None             # plain-text math, e.g. "200 + 15*size"
+    sourceText: str
+    confidence: float
 ```
+
+**Coverage note:** an earlier version of this schema had only `conditionAttribute` + `bands` —
+enough for exactly the flat/banded pattern proven in §7/§8, and nothing else. Checking it
+field-by-field against all 30 examples in the reference vocabulary found that roughly 27 of 30
+had *no field to go in at all* — not an untested gap, a schema gap: a rebate, a tax-on-another-
+component, a per-accessory charge, an aggregation, or a formula each had nowhere to be represented,
+regardless of how well Pass A/B read the document. The `mechanism` field and the fields above are
+the fix — each of the 8 mechanisms maps onto one or more of the 11 tiers in
+`reference/calculation-rule-vocabulary.md`. **This closes the gap at the schema level; it has not
+yet been run live against a document that actually needs anything beyond FLAT_OR_BANDED** — that's
+the next thing to verify, not something to claim as proven by this change alone.
 
 **Based on what, precisely:** not derived from `calculation-engine-3.0.0.yaml` directly — there is
 no `PolicyRule` schema anywhere in that file; it doesn't exist on the real engine's side at all.
@@ -256,17 +288,34 @@ fields `CalculationRule` has, extraction errors would be exactly as hard to spot
 when a developer hand-writes the final JSON straight away — the entire point of a separate
 intermediate stage is that it deliberately is *not* the target schema.
 
-Concretely, for the Chennai example in §7:
+Concretely, for the Chennai example in §7 (a `FLAT_OR_BANDED` case — the simple end of the range):
 
 ```json
 {
   "scheduleId": "SCHEDULE-I-A",
   "tradeNames": ["Plastic works", "Tailoring Machine", "...47 total"],
-  "conditionAttribute": "premisesArea",
-  "suggestedJsonPath": "$.tradeLicenseDetail.premisesArea",
-  "bands": [{"to": 1000, "amount": 2000}, {"from": 1000, "amount": 5000}],
+  "mechanism": "FLAT_OR_BANDED",
+  "variants": [
+    {"conditions": [{"attributeName": "premisesArea", "suggestedJsonPath": "$.tradeLicenseDetail.premisesArea", "to": 1000}], "amount": 2000},
+    {"conditions": [{"attributeName": "premisesArea", "suggestedJsonPath": "$.tradeLicenseDetail.premisesArea", "from": 1000}], "amount": 5000}
+  ],
   "sourceText": "Up to 1000 sq.ft. Rs.2000/- ; Above 1000 Sq.ft. Rs.5000/-",
   "confidence": 0.9
+}
+```
+
+And a `PERCENTAGE_OF_COMPONENT` case, for contrast — a tax the earlier schema had no way to hold
+at all (from the trade-license CGST/SGST pattern in `calculation-rule-examples.pdf`):
+
+```json
+{
+  "scheduleId": "SCHEDULE-I-TAX-CGST",
+  "tradeNames": ["Plastic works", "Tailoring Machine", "...47 total"],
+  "mechanism": "PERCENTAGE_OF_COMPONENT",
+  "referencesComponents": ["MICRO_COTTAGE_LICENSE_FEE"],
+  "variants": [{"conditions": [], "amount": 9}],
+  "sourceText": "9% CGST on the licence fee",
+  "confidence": 0.85
 }
 ```
 
@@ -287,11 +336,12 @@ Concretely, for the Chennai example in §7:
   express "any of these 250 names" directly. It just means the *information* isn't lost at the
   extraction stage while a real answer to the gap (extend the engine's schema, or resolve
   classification upstream via MDMS, or a lightweight standalone equivalent — see §3A) gets decided.
-- **`conditionAttribute` + `suggestedJsonPath` + `bands`, kept separate and simple** — this is
-  deliberately *not yet* the final `CalculationRule` shape (no `ruleType`, no `calculationType`, no
-  schema-specific conditions object). It's a plain, schema-agnostic description of "what varies,
+- **`mechanism` + `variants`/conditions, kept separate from the final schema's vocabulary** — even
+  expanded to cover all 8 mechanisms, this still isn't `CalculationRule` (no `ruleType` enum
+  forcing exact target vocabulary, no raw JSON Logic — `formulaHint` stays plain text at this
+  stage). It's a plain, schema-agnostic description of "what kind of pattern this is, what varies,
   and what it costs" — cheap for a human, or the next stage, to sanity-check, because a mistake
-  here shows up in three plain fields, not buried inside a JSONPath-heavy nested object.
+  here shows up in a few plain fields, not buried inside a JSONPath-heavy nested object.
 - **`confidence`** — not decorative. This is what actually dropped to 0.7 on the genuinely
   ambiguous Petrol Bunk/Service station case in §7 — a real, usable signal for the ambiguity-tiering
   step to act on, once it's built as more than a flat list.
@@ -726,10 +776,12 @@ usage grows, and what this pipeline is standing on that it doesn't control.
   incorrectly (a bug, not malice) could in principle mix one tenant's document content into
   another's processing — the more tenants, the more surface area for that specific mistake. Worth
   an explicit isolation test, not just an assumption that tenant-scoping "just works."
-- **The vocabulary reference and prompts will grow as more calculation patterns get covered** (the
-  coverage gap already named elsewhere — rebates, tax stacks, formulas). Current context windows
-  are large enough that this isn't an immediate ceiling, but an ever-growing prompt diluting the
-  model's focus on what matters most is a real long-term risk to monitor, not a one-time concern.
+- **The vocabulary reference and prompts will keep growing as real documents surface edge cases**
+  the 30-example reference doesn't cover yet. `PolicyRule` now has a field for every one of the 8
+  mechanisms in that reference (§6), but coverage of the reference isn't the same as coverage of
+  every real document — new patterns will still turn up. Current context windows are large enough
+  that this isn't an immediate ceiling, but an ever-growing prompt diluting the model's focus on
+  what matters most is a real long-term risk to monitor, not a one-time concern.
 
 ### Dependencies
 

@@ -52,20 +52,43 @@ This is reasoning, not the final output — write prose, not JSON."""
 EXTRACTION_SYSTEM_PROMPT = """Using the analysis provided (and the original document for
 reference), extract PolicyRule records — a normalized intermediate format, NOT the final
 CalculationRule schema, that mapping happens in a later stage. For each distinct fee pattern the
-analysis identified:
-- scheduleId: the schedule/section identifier.
-- tradeNames: every trade/item name this fee pattern applies to.
-- conditionAttribute: the single attribute the fee is banded on, or "none" if it's an unbanded flat fee.
-- suggestedJsonPath: your best-guess JSONPath for that attribute (a suggestion for the next stage
-  to confirm, not authoritative).
-- bands: fee amount per band (omit 'from'/'to' for unbounded; a flat fee is a single band with
-  both omitted).
-- sourceText: the verbatim text this pattern was extracted from.
-- confidence: 0-1.
-Also populate documentNotes with anything from the analysis that doesn't belong to one specific
-rule: external references you couldn't resolve, and cross-cutting clarifications (e.g. "no
-classification system exists, so no category condition should be added anywhere").
-Only extract what the analysis actually found — do not invent trade names or amounts."""
+analysis identified, first decide which of these 8 mechanisms it actually is, then fill in only
+the fields that mechanism needs:
+
+- FLAT_OR_BANDED: a fixed or banded amount. variants = one row per band, each with 0+ simultaneous
+  conditions (use `equals` for an exact match on a category/boolean, `from`/`to` for a numeric
+  range — never both on the same condition) and the amount for that row. A flat fee with no
+  banding is a single variant with no conditions.
+- PER_UNIT: a rate multiplied by one raw numeric field, no repeating array. Set
+  rateAppliesToAttribute to that field's name; variants holds the rate as `amount` (banded rates,
+  like "different rate per size range", still use multiple variants here).
+- PER_ITEM_IN_LIST: charged once per element of a repeating array (accessories, floors, taps).
+  Set subEntityHint to the array's name and rateAppliesToAttribute to the per-element field the
+  rate multiplies; variants' conditions match on per-element attributes (e.g. accessory type).
+- PERCENTAGE_OF_COMPONENT: a tax/cess computed as a percentage of another component's amount. Set
+  referencesComponents to the component(s) it reads; variants' amount is the percentage.
+- REBATE_OF_COMPONENT: a rebate/deduction/surcharge adjusting another component, usually a
+  negative amount. Same shape as PERCENTAGE_OF_COMPONENT otherwise. If the condition bands on an
+  already-derived total (not a raw field), set that condition's derivedFrom to the AGGREGATION
+  rule's scheduleId instead of a jsonPath-based from/to.
+- AGGREGATION: derives one attribute by summing/counting/etc. over a repeating array. Set
+  subEntityHint (the array), aggregateFunctionHint (SUM/COUNT/MAX/MIN/AVG), aggregationTargetName
+  (what the derived attribute should be called), and valueSources with the one field being
+  aggregated. No variants needed.
+- FORMULA: real math combining more than one input. Set valueSources (each a raw field or a
+  componentRef) and formulaHint as a short, plain description of the math (e.g. "200 + 15*size",
+  or "size*10 if fireSafetyClass=='A' else size*20") — do not write JSON Logic yourself, that's
+  the next stage's job.
+- TIME_BASED: interest/penalty. Same as FORMULA, but valueSources typically includes a
+  componentRef principal plus a raw time field (e.g. daysDelayed); referencesComponents should
+  list every component this depends on for sequencing, including ones only used for ordering.
+
+Always set: scheduleId, tradeNames (every trade/item this pattern applies to), sourceText (the
+verbatim quote), confidence (0-1). Also populate documentNotes with anything that doesn't belong
+to one specific rule: external references you couldn't resolve, and cross-cutting clarifications
+(e.g. "no classification system exists, so no category condition should be added anywhere").
+Only extract what the analysis actually found — do not invent trade names, amounts, or components
+that aren't in the source text."""
 
 
 def analyze(document_text: str, schedule_filter: str | None) -> str:

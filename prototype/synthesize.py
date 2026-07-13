@@ -18,12 +18,34 @@ OUTPUT_PATH = Path(__file__).parent / "fixtures_generated" / "synthesized_calcul
 SYSTEM_PROMPT = """You map normalized PolicyRule records into CalculationRule records for the
 DIGIT Calculation Engine. Use ONLY the patterns in the vocabulary reference below — do not invent
 mechanisms outside it. Every rule needs: ruleType, component, scope, calculationType,
-effectiveFrom. A banded flat fee becomes one RATE_MATRIX/FLAT rule per band, sharing one
-`component` name, each band's condition using from/to (never both from/to and equals on the same
-condition). Set a real `jsonPath` per condition using the PolicyRule's suggestedJsonPath. Populate
-the `assumptions` list with every non-obvious judgment call you made (boundary inclusivity,
-effectiveFrom when the document doesn't state one, module name, roundOff default) so a business
-user can review and override them — do not silently decide these without recording them.
+effectiveFrom. Set a real `jsonPath` per condition using the PolicyRule's suggestedJsonPath (never
+both `equals` and `from`/`to` on the same condition).
+
+Map each PolicyRule's `mechanism` onto the vocabulary reference as follows:
+- FLAT_OR_BANDED -> one RATE_MATRIX/FLAT rule per variant, sharing one `component` name, each
+  variant's conditions carried over as-is (0, 1, or several ANDed conditions per rule).
+- PER_UNIT / PER_ITEM_IN_LIST -> RATE_MATRIX/PER_UNIT, `appliesOn.jsonPath` = rateAppliesToAttribute.
+  PER_ITEM_IN_LIST additionally sets scope=SUBENTITY and subEntityPath from subEntityHint (turn
+  the hint into a real JSONPath ending in `[*]`, e.g. "accessories" -> a plausible
+  `$.<module>Detail.accessories[*]` given the rest of the document's field-naming style).
+- PERCENTAGE_OF_COMPONENT -> TAX (or RATE_MATRIX if the source clearly isn't a statutory tax),
+  calculationType PERCENTAGE, `appliesOn.componentRef` and `dependsOn` from referencesComponents.
+- REBATE_OF_COMPONENT -> ADJUSTMENT, `appliesOn.componentRef` and `dependsOn` from
+  referencesComponents, value/variant amounts kept negative as given. A condition with
+  `derivedFrom` set bands on an AGGREGATION component's output instead of a raw field.
+- AGGREGATION -> ruleType AGGREGATION, scope=SUBENTITY, subEntityPath from subEntityHint,
+  aggregateFunction from aggregateFunctionHint, sourceAttribute from valueSources[0],
+  targetAttribute from aggregationTargetName. Give it a low priority so it runs before dependents.
+- FORMULA / TIME_BASED -> calculationType FORMULA (ruleType FORMULA-bearing rules use RATE_MATRIX/
+  INTEREST/PENALTY as appropriate), formulaVariables built from valueSources (jsonPath or
+  componentRef per source), and formulaLogic as real JSON Logic formalizing formulaHint's
+  plain-text math description. dependsOn must list every componentRef used.
+
+Populate the `assumptions` list with every non-obvious judgment call you made (boundary
+inclusivity, effectiveFrom when the document doesn't state one, module name, roundOff default,
+how you turned a subEntityHint into a real JSONPath, how you formalized a formulaHint into JSON
+Logic) so a business user can review and override them — do not silently decide these without
+recording them.
 
 Vocabulary reference:
 {vocab}
