@@ -340,6 +340,53 @@ def test_33_no_overlapping_bands():
     PASSED.append("33-no-overlapping-bands")
 
 
+def test_34_formula_variables_registry_conflict():
+    """CalculationRule's own x-businessRule states the attribute-path registry check applies to
+    `conditions` keys AND `formulaVariables` keys -- validate.py only checked `conditions` until
+    now. Confirms a formulaVariables name reused with a different jsonPath across two rules is
+    now caught, and that reusing the same name with the SAME jsonPath (legitimate) still passes."""
+    from validate import validate_rule_set
+
+    conflicting = [
+        {
+            "ruleType": "RATE_MATRIX", "component": "PREMISES_SIZE_FEE", "scope": "ENTITY", "conditions": {},
+            "calculationType": "FORMULA", "effectiveFrom": "2024-04-01",
+            "formulaLogic": {"var": "size"},
+            "formulaVariables": {"size": {"jsonPath": "$.certificateDetail.sizeSqm"}},
+        },
+        {
+            "ruleType": "RATE_MATRIX", "component": "FIRE_SAFETY_FEE", "scope": "ENTITY", "conditions": {},
+            "calculationType": "FORMULA", "effectiveFrom": "2024-04-01",
+            "formulaLogic": {"var": "size"},
+            # Same variable name "size", different jsonPath -- exactly the conflict the real
+            # registry rejects with 409 AttributePath.Conflict.
+            "formulaVariables": {"size": {"jsonPath": "$.premises.builtUpArea"}},
+        },
+    ]
+    errors = validate_rule_set(conflicting)
+    assert any("size" in e and "AttributePath.Conflict" in e for e in errors), \
+        f"expected an attribute-path conflict for reused formulaVariables name 'size', got: {errors}"
+
+    consistent = [
+        {
+            "ruleType": "RATE_MATRIX", "component": "PREMISES_SIZE_FEE", "scope": "ENTITY", "conditions": {},
+            "calculationType": "FORMULA", "effectiveFrom": "2024-04-01",
+            "formulaLogic": {"var": "size"},
+            "formulaVariables": {"size": {"jsonPath": "$.certificateDetail.sizeSqm"}},
+        },
+        {
+            "ruleType": "RATE_MATRIX", "component": "FIRE_SAFETY_FEE", "scope": "ENTITY", "conditions": {},
+            "calculationType": "FORMULA", "effectiveFrom": "2024-04-01",
+            "formulaLogic": {"var": "size"},
+            "formulaVariables": {"size": {"jsonPath": "$.certificateDetail.sizeSqm"}},  # same path -- fine
+        },
+    ]
+    errors = validate_rule_set(consistent)
+    assert not errors, f"reusing the same name with the same jsonPath should validate cleanly, got: {errors}"
+
+    PASSED.append("34-formula-variables-registry-conflict")
+
+
 if __name__ == "__main__":
     import sys
     test_functions = [v for k, v in list(globals().items()) if k.startswith("test_")]
@@ -350,6 +397,7 @@ if __name__ == "__main__":
         print(f"FAILED: {FAILED}")
         sys.exit(1)
     print("\nAll 30 reference examples (across all 11 tiers) have a place in PolicyRule, plus "
-          "3 additional cases (presence-only conditions; AttributeBinding's exactly-one-of-"
-          "jsonPath/componentRef rule; no-overlapping-bands-and-effective-dates) found directly "
-          "in the real schema's own business rules, not demonstrated by any of the 30.")
+          "4 additional cases (presence-only conditions; AttributeBinding's exactly-one-of-"
+          "jsonPath/componentRef rule; no-overlapping-bands-and-effective-dates; formulaVariables "
+          "registry conflicts) found directly in the real schema's own business rules, not "
+          "demonstrated by any of the 30.")

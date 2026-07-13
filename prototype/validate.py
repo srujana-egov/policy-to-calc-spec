@@ -186,21 +186,34 @@ def _extract_var_refs(node) -> set[str]:
 
 
 def _validate_attribute_path_registry(rules: list[dict]) -> list[str]:
-    """First rule to use an attribute name registers its jsonPath; later rules must match."""
+    """First rule to use an attribute name registers its jsonPath; later rules must match.
+
+    Per CalculationRule's own x-businessRules, this registry check applies to `conditions` keys
+    AND `formulaVariables` keys (both are "attribute name -> jsonPath" declarations reused across
+    rules) -- not just `conditions`, which is all this checked until now."""
     errs = []
     registry: dict[str, str] = {}
+
+    def check_and_register(i: int, attr_name: str, json_path) -> None:
+        if attr_name in registry and registry[attr_name] != json_path:
+            errs.append(
+                f"rule[{i}]: attribute '{attr_name}' already registered with jsonPath "
+                f"'{registry[attr_name]}', this rule declares '{json_path}' — 409 AttributePath.Conflict"
+            )
+        else:
+            registry[attr_name] = json_path
+
     for i, rule in enumerate(rules):
         for attr_name, cond in (rule.get("conditions") or {}).items():
             if "derivedFrom" in cond:
-                continue
-            json_path = cond.get("jsonPath")
-            if attr_name in registry and registry[attr_name] != json_path:
-                errs.append(
-                    f"rule[{i}]: attribute '{attr_name}' already registered with jsonPath "
-                    f"'{registry[attr_name]}', this rule declares '{json_path}' — 409 AttributePath.Conflict"
-                )
-            else:
-                registry[attr_name] = json_path
+                continue  # reads an AGGREGATION result, not a raw payload path -- not registry-tracked
+            check_and_register(i, attr_name, cond.get("jsonPath"))
+
+        for var_name, binding in (rule.get("formulaVariables") or {}).items():
+            if binding.get("componentRef"):
+                continue  # reads another component's computed amount, not a raw payload path
+            check_and_register(i, var_name, binding.get("jsonPath"))
+
     return errs
 
 
