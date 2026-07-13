@@ -69,6 +69,46 @@ registered schema's field validate against another registered schema's data (a r
 foreign-key-style check across schemas) — a possible future link point between the calc-engine
 schema and the workflow config, if they ever need to cross-reference each other's entities.
 
+### How the schema itself gets authored
+
+Same underlying question as Steps 3–4 — what input modality does someone with no JSON Schema
+knowledge use — but the answer differs here, for a specific reason worth stating plainly: **JSON
+Schema Draft 2020-12's own vocabulary is small and closed** (a handful of types — `string`,
+`integer`, `number`, `boolean`, `array`, `object` — plus a short, well-known list of constraint
+keywords — `minimum`/`maximum`, `minLength`/`maxLength`, `format`, `enum`, `required`). Unlike
+"arbitrary calculation logic in a fee schedule" or "arbitrary business process," there's no
+equivalent of the `SLAB`-vs-`FLAT_OR_BANDED` ambiguity to trip over here. That makes natural
+language a much more tractable input for *this specific* task than it was for Steps 3 or 4.
+
+**Recommended: a hybrid, not free text alone.** Natural language ("a name, required; an email
+that must look like an email, required; an age between 0 and 150, optional") drafts the schema
+via a small, bounded LLM call, but the draft always lands in a wizard for field-by-field
+confirmation before it's registered — the same "LLM pre-fills, human confirms inside the
+structured surface" pattern already used for Step 3's legacy-document path. This catches the one
+risk natural language still has here: someone forgetting to mark a field `required`, or stating a
+constraint vaguely ("age should be reasonable" — what number, exactly?).
+
+**The wizard, concretely — deterministic, no LLM needed for this half:**
+1. "What do you want to call this field?" → property name
+2. "What kind of value is it?" → Text / Whole number / Decimal / Yes-No / Date / A list of things
+   / A nested group of fields
+   - Text → "Any length limits?" → `minLength`/`maxLength`. "Does it need to look like something
+     specific?" → email / URL / date / (none) → `format`
+   - Number → "Any minimum? Maximum?" → `minimum`/`maximum`
+   - List → "What goes inside each item?" → recurse into this same question → `items`
+   - Nested group → "What fields does this contain?" → recurse into the whole flow → nested
+     `properties`
+3. "Is this required, or optional?" → adds to (or omits from) the schema's `required` array
+4. "Add another field?" → loop until done
+5. Ask once, up front: `schemaCode`, `version` (tenant is fixed by session context)
+6. Preview both a plain summary table and the raw JSON Schema before confirming
+
+**Registry *data* entry doesn't need its own design at all** — once a schema is registered, a
+data-entry form for it can be auto-generated directly from that schema (a well-known, already-
+solved pattern, e.g. `react-jsonschema-form`-style renderers), since the schema already fully
+describes every field, type, and constraint. The only genuinely new design work in Step 2 is
+authoring the schema itself; data entry rides along for free afterward.
+
 ## Step 3 — Calculation Engine pipeline
 
 Full detail already exists in `DESIGN.md`/`DEMO.md` for the *legacy-document* version of this
@@ -178,12 +218,16 @@ confirmation gate + audit log (not built) → write to the real DIGIT Workflow S
 
 ```mermaid
 flowchart TD
-    M["(Step 1 — parked)<br/>module / certificate type selected"]:::parked --> S2
+    M["(Step 1 — parked)<br/>module / certificate type selected"]:::parked --> S2WIZ
     M --> S4A
 
     subgraph STEP2["Step 2 — Registry: define the real entity schema"]
-        S2["Admin/developer writes a JSON Schema<br/>(Draft 2020-12) for this entity<br/>e.g. tradeLicenseDetail.employeeCount,<br/>premisesArea, accessories[]"]:::human --> S2W
+        S2NL["Describe fields in plain language<br/>(optional — small, closed vocabulary<br/>makes this tractable here, unlike<br/>Steps 3/4)"]:::ai -.->|drafts| S2WIZ
+        S2WIZ["Field-by-field wizard:<br/>name? type? constraints?<br/>required?"]:::human --> S2PREVIEW
+        S2PREVIEW["Preview: summary table<br/>+ raw JSON Schema"]:::code --> S2W
         S2W["POST /registry/v1/schema<br/>{schemaCode, definition}"]:::code
+        S2DATA["Registry DATA entry:<br/>form auto-generated FROM<br/>the schema above — no separate<br/>design needed"]:::code
+        S2W -.->|schema drives| S2DATA
     end
 
     subgraph STEP3["Step 3 — Calculation Engine pipeline"]
