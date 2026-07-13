@@ -134,7 +134,7 @@ Two ways to close this gap, and this is a real product decision, not something t
   trade name. No engine change, but requires a trade-name → schedule-code MDMS mapping to exist
   or be generated as a side artifact.
 
-This should be flagged to Ghanshyam as a decision before building the rule-synthesis step — it
+This should be flagged to the platform team as a decision before building the rule-synthesis step — it
 determines whether the generator also needs to emit an MDMS mapping artifact alongside the rules.
 Recommendation: **(b)**, since it keeps the Calculation Engine generic (per its own design
 principle of not hardcoding module vocabulary) and the mapping table is a natural byproduct of
@@ -203,20 +203,10 @@ human involved — the reflection-guardrail pattern). Step 9 sending work back t
 
 ### 2. Extract & Normalize
 - LLM pass converts each schedule into an intermediate **PolicyRule** representation (not yet
-  the final API schema) — deliberately a simpler shape so extraction errors are cheap to spot:
-
-```json
-{
-  "scheduleId": "SCHEDULE-I",
-  "tradeNames": ["Plastic works", "Tailoring Machine", "..."],
-  "conditionAttribute": "premisesArea",
-  "bands": [
-    {"to": 1000, "amount": 2000},
-    {"from": 1000, "amount": 5000}
-  ],
-  "sourceText": "Up to 1000 sq.ft. Rs.2000/- ; Above 1000 Sq.ft. Rs.5000/-"
-}
-```
+  the final API schema) — deliberately a simpler shape so extraction errors are cheap to spot.
+  The actual, current shape (expanded well beyond this design doc's original sketch, to cover all
+  9 mechanisms the target schema needs) lives in `prototype/models.py`, described in `DEMO.md`§6
+  — not duplicated here, to avoid this doc silently going stale again the way its first version did.
 - Also emits the **tradeName → scheduleId** mapping as a byproduct (feeds the MDMS decision above).
 - Every extracted field keeps a confidence score and the verbatim source span, for Stage 3.
 
@@ -302,7 +292,7 @@ visible and fixable in a small intermediate structure, instead of being buried i
 heavy `CalculationRule` object. Ambiguity detection (3) sits between them specifically so
 blocking questions are asked *before* rule synthesis, not discovered as validation failures after.
 
-## Open questions for product/Ghanshyam sign-off
+## Open questions for product/platform-team sign-off
 
 1. Trade-name grouping: extend Calculation Engine with an `in` condition operator, vs. push
    classification to an MDMS mapping (recommended, see above). Only relevant to documents shaped
@@ -343,28 +333,13 @@ for extraction/synthesis and plain deterministic code for validation (the schema
 confirmation gate, audit logging, Temporal orchestration, the "locate relevant spans" step
 (Bissau-style needle-in-haystack extraction is a stretch goal, not the core demo path).
 
-## Suggested repo layout
-
-```
-policy-to-calc-spec/
-  ingest/        # PDF/table extraction + locate-relevant-spans filter
-  extract/       # LLM extraction → PolicyRule intermediate format + confidence/source spans
-  clarify/       # ambiguity tiering + batched-assumption + blocking-question logic
-  synthesize/    # PolicyRule -> CalculationRule, offline schema + registry validation
-  simulate/      # offline evaluator + synthetic payload generation
-  review/        # business-user-facing rendering of rules + assumptions + examples
-  reference/     # calculation-rule-vocabulary.md — target CalculationRule pattern lookup table
-  fixtures/      # sample policy docs: Chennai (clean/broad) + Bissau (messy/narrow) as the
-                 # acceptance bar for prototype #1
-```
-
 ## Live project context
 
 The underlying opportunity is real, even though Example B's exact content isn't confirmed: there
 is a real, currently-relaunching pilot — Guinea-Bissau business licence digitalization (Bissau
-City Council / CMB) — forwarded 2026-04-14 by Tahera Bharmal (PM) to Ghanshyam Rawat and others as
-a potential SaaS opportunity, originating from the City Council's technical contact (Domiciano
-Jurarim) via Suhas Rajaram. Example B (the requirement-gathering questionnaire) was found online
+City Council / CMB) — forwarded 2026-04-14 by the product team to the platform team as a
+potential SaaS opportunity, originating from the City Council's own technical contact and relayed
+through the product team. Example B (the requirement-gathering questionnaire) was found online
 by the product team as an illustrative sample of that pilot's likely document shape, **not**
 confirmed as the literal document that will be supplied. When the actual policy document arrives,
 expect it to be a variation on this with more rule complexity — the product-side expectation is

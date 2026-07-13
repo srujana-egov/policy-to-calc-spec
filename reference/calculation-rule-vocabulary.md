@@ -3,7 +3,7 @@
 Condensed from `calculation-rule-examples.pdf` (30 worked examples, simple → complex) and
 verified against the authoritative schema in `calculation-engine-3.0.0.yaml`
 (`components/schemas/CalculationRule`, `AttributeCondition`, `AttributeBinding`, `Slab`) — both
-supplied by Ghanshyam. This is the lookup table Stage 4 (Rule Synthesis) maps every extracted
+supplied by the platform team. This is the lookup table Stage 4 (Rule Synthesis) maps every extracted
 `PolicyRule` onto — every real policy fee pattern reduces to one or more rows below, combined.
 Where the two sources could be read as disagreeing, the YAML schema and its `x-businessRules`
 win — the examples doc illustrates the schema, it doesn't extend it.

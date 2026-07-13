@@ -283,6 +283,19 @@ claim: `prototype/test_policy_rule_coverage.py` constructs and validates a `Poli
 the 30 reference examples individually and passes** (`python test_policy_rule_coverage.py`) — the
 9 mechanisms above are verified to cover the full reference set, not asserted to.
 
+The story doesn't stop at the 30 examples, either. A separate, more rigorous pass — reading
+`calculation-engine-3.0.0.yaml`'s own sub-schemas and `x-businessRules` line by line, not
+re-checking the same 30 examples again — found four more real gaps the example set never
+demonstrated at all: `CalculationRule` had no `isActive` field and incorrectly carried a
+per-rule `module` field the real schema marks read-only (fixed, `module` moved to
+`CalculationRuleSet`); `AttributeCondition`'s "presence-only" condition shape (neither `equals`
+nor `from`/`to`) wasn't handled; `AttributeBinding`'s "exactly one of `jsonPath`/`componentRef`"
+rule wasn't enforced anywhere; and the attribute-path registry conflict check only looked at
+`conditions` keys, missing `formulaVariables` keys entirely, plus a missing check for two
+sibling rules with genuinely overlapping condition bands during an overlapping effective-date
+window. All five are now fixed and tested — `test_policy_rule_coverage.py` covers 34 cases, not
+30, the extra four found by auditing the spec directly rather than by adding more examples.
+
 **Based on what, precisely:** not derived from `calculation-engine-3.0.0.yaml` directly — there is
 no `PolicyRule` schema anywhere in that file; it doesn't exist on the real engine's side at all.
 This is a hand-designed intermediate format, informed by two things: (1) knowing what the *target*
