@@ -19,7 +19,14 @@ SYSTEM_PROMPT = """You map normalized PolicyRule records into CalculationRule re
 DIGIT Calculation Engine. Use ONLY the patterns in the vocabulary reference below — do not invent
 mechanisms outside it. Every rule needs: ruleType, component, scope, calculationType,
 effectiveFrom. Set a real `jsonPath` per condition using the PolicyRule's suggestedJsonPath (never
-both `equals` and `from`/`to` on the same condition).
+both `equals` and `from`/`to` on the same condition — but leaving both unset is valid too, meaning
+the condition only requires that attribute to be present, no specific value; carry that through
+as-is, don't invent an `equals`/`from`/`to` value that wasn't in the PolicyCondition).
+
+Set CalculationRuleSet.module ONCE for the whole batch (e.g. "trade-license") — infer it from what
+this document's fees are actually for. Do NOT set a `module` field on individual CalculationRule
+objects — the real schema has no such field there; `module` is resolved from the `{module}` path
+segment when a batch is written (`POST /{module}/rules`), never repeated per rule.
 
 Map each PolicyRule's `mechanism` onto the vocabulary reference as follows:
 - FLAT_OR_BANDED -> one RATE_MATRIX/FLAT rule per variant, sharing one `component` name, each
@@ -47,6 +54,11 @@ Map each PolicyRule's `mechanism` onto the vocabulary reference as follows:
   INTEREST/PENALTY as appropriate), formulaVariables built from valueSources (jsonPath or
   componentRef per source), and formulaLogic as real JSON Logic formalizing formulaHint's
   plain-text math description. dependsOn must list every componentRef used.
+
+Every `appliesOn`, `sourceAttribute`, and each entry in `formulaVariables` must set EXACTLY ONE of
+`jsonPath` or `componentRef` — never both, never neither. Use the matching PolicyValueSource field
+(`suggestedJsonPath` vs `referencesComponent`) to decide which one applies; don't guess or fill in
+a placeholder for whichever one you don't have.
 
 Populate the `assumptions` list with every non-obvious judgment call you made (boundary
 inclusivity, effectiveFrom when the document doesn't state one, module name, roundOff default,

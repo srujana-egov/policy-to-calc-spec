@@ -35,6 +35,7 @@ def validate_rule_set(rules: list[dict]) -> list[str]:
     errors.extend(_validate_attribute_path_registry(rules))
     errors.extend(_validate_subentity_path_consistency(rules))
     errors.extend(_validate_dependson_dag(rules))
+    errors.extend(_validate_no_overlapping_bands(rules))
 
     return errors
 
@@ -77,6 +78,16 @@ def _validate_single_rule(rule: dict) -> list[str]:
         errs.append("calculationType=PERCENTAGE requires appliesOn.componentRef")
     if rule_type == "ADJUSTMENT" and not applies_on.get("componentRef"):
         errs.append("ruleType=ADJUSTMENT requires appliesOn.componentRef")
+
+    # AttributeBinding shape: exactly one of jsonPath/componentRef, everywhere one is used
+    # (appliesOn, sourceAttribute, each formulaVariables entry) -- per AttributeBinding's own
+    # x-businessRules, not tied to any one calculationType/ruleType above.
+    if rule.get("appliesOn") is not None:
+        errs.extend(_validate_binding_shape(rule["appliesOn"], "appliesOn"))
+    if rule.get("sourceAttribute") is not None:
+        errs.extend(_validate_binding_shape(rule["sourceAttribute"], "sourceAttribute"))
+    for var_name, binding in (rule.get("formulaVariables") or {}).items():
+        errs.extend(_validate_binding_shape(binding, f"formulaVariables.{var_name}"))
 
     # SLAB
     if calc_type == "SLAB":
@@ -127,6 +138,19 @@ def _validate_single_rule(rule: dict) -> list[str]:
         errs.append(f"effectiveTo ({effective_to}) must be strictly after effectiveFrom ({effective_from})")
 
     return errs
+
+
+def _validate_binding_shape(binding: dict, label: str) -> list[str]:
+    """AttributeBinding's own x-businessRule: exactly one of jsonPath/componentRef, never both,
+    never neither -- jsonPath reads the raw payload, componentRef reads another component's
+    already-computed amount."""
+    has_json_path = bool(binding.get("jsonPath"))
+    has_component_ref = bool(binding.get("componentRef"))
+    if has_json_path and has_component_ref:
+        return [f"{label} sets both 'jsonPath' and 'componentRef' — pick one"]
+    if not has_json_path and not has_component_ref:
+        return [f"{label} sets neither 'jsonPath' nor 'componentRef' — exactly one is required"]
+    return []
 
 
 def _validate_slabs(slabs: list[dict]) -> list[str]:
@@ -229,3 +253,84 @@ def _validate_dependson_dag(rules: list[dict]) -> list[str]:
         visit(component, [])
 
     return errs
+
+
+def _validate_no_overlapping_bands(rules: list[dict]) -> list[str]:
+    """x-businessRule: no two active rules for the same component may have overlapping conditions
+    AND an overlapping effective-date range. Full overlap detection across arbitrary multi-
+    attribute conditions is an open constraint problem; this catches the concrete, real risk
+    instead -- two rules sharing a component and a single banded attribute (e.g. premisesArea)
+    whose ranges/equals values actually overlap. This is exactly the Chennai boundary case
+    (hand-resolved via 'from: 1000.01' to avoid it) -- this check exists so that kind of mistake
+    gets caught automatically instead of relying on a human noticing."""
+    errs = []
+    by_component: dict[str, list[tuple[int, dict]]] = {}
+    for i, rule in enumerate(rules):
+        component = rule.get("component")
+        if component is not None:
+            by_component.setdefault(component, []).append((i, rule))
+
+    for component, indexed_rules in by_component.items():
+        for a in range(len(indexed_rules)):
+            for b in range(a + 1, len(indexed_rules)):
+                i, rule_a = indexed_rules[a]
+                j, rule_b = indexed_rules[b]
+                if not _effective_ranges_overlap(rule_a, rule_b):
+                    continue
+                shared_attr = _shared_attribute_condition_overlaps(rule_a, rule_b)
+                if shared_attr:
+                    errs.append(
+                        f"rule[{i}] and rule[{j}] (component '{component}') have overlapping "
+                        f"'{shared_attr}' conditions during an overlapping effective date range"
+                    )
+    return errs
+
+
+def _effective_ranges_overlap(rule_a: dict, rule_b: dict) -> bool:
+    a_from, a_to = rule_a.get("effectiveFrom"), rule_a.get("effectiveTo")
+    b_from, b_to = rule_b.get("effectiveFrom"), rule_b.get("effectiveTo")
+    if a_from is None or b_from is None:
+        return True  # can't prove disjoint without dates -- conservative
+    if a_to is not None and b_from > a_to:
+        return False
+    if b_to is not None and a_from > b_to:
+        return False
+    return True
+
+
+def _shared_attribute_condition_overlaps(rule_a: dict, rule_b: dict) -> str | None:
+    conditions_a = rule_a.get("conditions") or {}
+    conditions_b = rule_b.get("conditions") or {}
+    for attr in set(conditions_a) & set(conditions_b):
+        if not _condition_pair_disjoint(conditions_a[attr], conditions_b[attr]):
+            return attr  # shared attribute, can't prove disjoint -- flag it
+    return None
+
+
+def _condition_pair_disjoint(cond_a: dict, cond_b: dict) -> bool:
+    """True only if these two single-attribute conditions can be PROVEN to never both match the
+    same value. Conservative: returns False ("might overlap") whenever unsure."""
+    a_equals, b_equals = cond_a.get("equals"), cond_b.get("equals")
+    if a_equals is not None and b_equals is not None:
+        return a_equals != b_equals
+
+    a_from, a_to = cond_a.get("from"), cond_a.get("to")
+    b_from, b_to = cond_b.get("from"), cond_b.get("to")
+    has_range_a = a_from is not None or a_to is not None
+    has_range_b = b_from is not None or b_to is not None
+
+    if has_range_a and has_range_b:
+        lo_a, hi_a = (a_from if a_from is not None else float("-inf")), (a_to if a_to is not None else float("inf"))
+        lo_b, hi_b = (b_from if b_from is not None else float("-inf")), (b_to if b_to is not None else float("inf"))
+        return hi_a < lo_b or hi_b < lo_a
+
+    if a_equals is not None and has_range_b:
+        lo_b = b_from if b_from is not None else float("-inf")
+        hi_b = b_to if b_to is not None else float("inf")
+        return not (lo_b <= a_equals <= hi_b)
+    if b_equals is not None and has_range_a:
+        lo_a = a_from if a_from is not None else float("-inf")
+        hi_a = a_to if a_to is not None else float("inf")
+        return not (lo_a <= b_equals <= hi_a)
+
+    return False  # can't prove disjoint (e.g. both presence-only) -- conservative

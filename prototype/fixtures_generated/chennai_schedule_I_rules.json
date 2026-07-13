@@ -1,5 +1,6 @@
 {
   "sourceDocument": "core zone4 5 6 8 9 10 13.pdf — SCHEDULE-I, Micro Cottage Industries, trades 1-47",
+  "module": "trade-license",
   "assumptions": [
     "\"Above 1000 sq.ft.\" interpreted as area > 1000, not >= 1000 — modeled as from: 1000.01 to avoid an exact overlap with \"Up to 1000 sq.ft.\" (to: 1000) at the boundary. Confirm with business user.",
     "effectiveFrom set to 2008-07-30 (the council resolution date cited in the document header) — the document does not state a separate effective date for the fee schedule itself. Confirm with business user.",
@@ -8,7 +9,6 @@
   ],
   "rules": [
     {
-      "module": "trade-license",
       "ruleType": "RATE_MATRIX",
       "component": "MICRO_COTTAGE_LICENSE_FEE",
       "scope": "ENTITY",
@@ -22,7 +22,6 @@
       "effectiveFrom": "2008-07-30"
     },
     {
-      "module": "trade-license",
       "ruleType": "RATE_MATRIX",
       "component": "MICRO_COTTAGE_LICENSE_FEE",
       "scope": "ENTITY",

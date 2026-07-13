@@ -236,6 +236,110 @@ def test_30_penalty_two_dependencies():
         sourceText="2% penalty on tax plus interest", confidence=0.8))
 
 
+def test_31_presence_only_condition():
+    """Not one of the 30 reference examples -- found by reading AttributeCondition's own
+    x-businessRules directly in calculation-engine-3.0.0.yaml, which allows a condition with
+    neither `equals` nor `from`/`to`: the fee applies if the attribute is merely present, no
+    specific value required. None of the 30 examples demonstrate this pattern."""
+    check("31-presence-only", PolicyRule(scheduleId="EX31", tradeNames=["Fire safety certificate holders"], mechanism="FLAT_OR_BANDED",
+        variants=[PolicyRuleVariant(conditions=[
+            PolicyCondition(attributeName="fireSafetyCertificate", suggestedJsonPath="$.certificateDetail.fireSafetyCertificate")],
+            amount=1000)],
+        sourceText="an add-on fee applies if a fire safety certificate is on file", confidence=0.85))
+
+    # Round-trip check: does validate.py actually accept this shape in a real CalculationRule,
+    # or does its condition check silently reject/mis-handle the "neither set" case?
+    from validate import validate_rule_set
+    rule_with_presence_only_condition = {
+        "ruleType": "RATE_MATRIX", "component": "FIRE_SAFETY_ADDON_FEE", "scope": "ENTITY",
+        "conditions": {"fireSafetyCertificate": {"jsonPath": "$.certificateDetail.fireSafetyCertificate"}},
+        "calculationType": "FLAT", "value": 1000, "effectiveFrom": "2024-04-01",
+    }
+    errors = validate_rule_set([rule_with_presence_only_condition])
+    assert not errors, f"presence-only condition should validate cleanly, got: {errors}"
+    PASSED.append("31-validate.py-roundtrip")
+
+
+def test_32_attribute_binding_exactly_one_of():
+    """AttributeBinding's own x-businessRule: exactly one of jsonPath/componentRef on appliesOn,
+    sourceAttribute, and every formulaVariables entry. Confirms validate.py actually catches both
+    violations (neither set, both set) rather than silently accepting malformed bindings."""
+    from validate import validate_rule_set
+
+    neither_set = {
+        "ruleType": "RATE_MATRIX", "component": "SIZE_FEE", "scope": "ENTITY", "conditions": {},
+        "calculationType": "FORMULA", "effectiveFrom": "2024-04-01",
+        "formulaLogic": {"var": "size"},
+        "formulaVariables": {"size": {}},  # neither jsonPath nor componentRef
+    }
+    errors = validate_rule_set([neither_set])
+    assert any("formulaVariables.size" in e and "neither" in e for e in errors), \
+        f"expected a 'neither set' error for formulaVariables.size, got: {errors}"
+
+    both_set = {
+        "ruleType": "TAX", "component": "CGST", "scope": "ENTITY", "conditions": {},
+        "calculationType": "PERCENTAGE", "value": 9, "effectiveFrom": "2024-04-01",
+        "appliesOn": {"jsonPath": "$.someField", "componentRef": "LICENSE_FEE"},  # both set
+    }
+    errors = validate_rule_set([both_set])
+    assert any("appliesOn" in e and "both" in e for e in errors), \
+        f"expected a 'both set' error for appliesOn, got: {errors}"
+
+    valid = {
+        "ruleType": "TAX", "component": "CGST", "scope": "ENTITY", "conditions": {},
+        "calculationType": "PERCENTAGE", "value": 9, "effectiveFrom": "2024-04-01",
+        "appliesOn": {"componentRef": "LICENSE_FEE"}, "dependsOn": ["LICENSE_FEE"],
+    }
+    errors = validate_rule_set([valid])
+    assert not errors, f"a correctly-shaped binding should validate cleanly, got: {errors}"
+
+    PASSED.append("32-attribute-binding-exactly-one-of")
+
+
+def test_33_no_overlapping_bands():
+    """x-businessRule: no two active rules for the same component may have overlapping
+    conditions AND an overlapping effective date range. This is exactly the class of mistake the
+    Chennai fixture avoids by hand ('from: 1000.01' instead of 'from: 1000') -- confirms
+    validate.py now catches it automatically instead of relying on a human noticing, and that a
+    correctly-resolved boundary (the actual Chennai shape) still passes clean."""
+    from validate import validate_rule_set
+
+    truly_overlapping = [
+        {
+            "ruleType": "RATE_MATRIX", "component": "MICRO_COTTAGE_LICENSE_FEE", "scope": "ENTITY",
+            "conditions": {"premisesArea": {"jsonPath": "$.tradeLicenseDetail.premisesArea", "to": 1000}},
+            "calculationType": "FLAT", "value": 2000, "effectiveFrom": "2024-04-01",
+        },
+        {
+            "ruleType": "RATE_MATRIX", "component": "MICRO_COTTAGE_LICENSE_FEE", "scope": "ENTITY",
+            # Deliberately the un-fixed version: "from: 1000" overlaps the first rule's "to: 1000"
+            # at the shared boundary value, unlike the real fixture's "from: 1000.01".
+            "conditions": {"premisesArea": {"jsonPath": "$.tradeLicenseDetail.premisesArea", "from": 1000}},
+            "calculationType": "FLAT", "value": 5000, "effectiveFrom": "2024-04-01",
+        },
+    ]
+    errors = validate_rule_set(truly_overlapping)
+    assert any("premisesArea" in e and "overlap" in e for e in errors), \
+        f"expected an overlap error for the un-fixed boundary, got: {errors}"
+
+    correctly_disjoint = [
+        {
+            "ruleType": "RATE_MATRIX", "component": "MICRO_COTTAGE_LICENSE_FEE", "scope": "ENTITY",
+            "conditions": {"premisesArea": {"jsonPath": "$.tradeLicenseDetail.premisesArea", "to": 1000}},
+            "calculationType": "FLAT", "value": 2000, "effectiveFrom": "2024-04-01",
+        },
+        {
+            "ruleType": "RATE_MATRIX", "component": "MICRO_COTTAGE_LICENSE_FEE", "scope": "ENTITY",
+            "conditions": {"premisesArea": {"jsonPath": "$.tradeLicenseDetail.premisesArea", "from": 1000.01}},
+            "calculationType": "FLAT", "value": 5000, "effectiveFrom": "2024-04-01",
+        },
+    ]
+    errors = validate_rule_set(correctly_disjoint)
+    assert not errors, f"the actual Chennai boundary fix should validate cleanly, got: {errors}"
+
+    PASSED.append("33-no-overlapping-bands")
+
+
 if __name__ == "__main__":
     import sys
     test_functions = [v for k, v in list(globals().items()) if k.startswith("test_")]
@@ -245,4 +349,7 @@ if __name__ == "__main__":
     if FAILED:
         print(f"FAILED: {FAILED}")
         sys.exit(1)
-    print("\nAll 30 reference examples (across all 11 tiers) now have a place in PolicyRule.")
+    print("\nAll 30 reference examples (across all 11 tiers) have a place in PolicyRule, plus "
+          "3 additional cases (presence-only conditions; AttributeBinding's exactly-one-of-"
+          "jsonPath/componentRef rule; no-overlapping-bands-and-effective-dates) found directly "
+          "in the real schema's own business rules, not demonstrated by any of the 30.")

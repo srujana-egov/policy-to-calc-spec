@@ -57,11 +57,14 @@ the fields that mechanism needs:
 
 - FLAT_OR_BANDED: a fixed or banded amount, where exactly ONE matching band's amount applies to
   the WHOLE value. variants = one row per band, each with 0+ simultaneous conditions (use `equals`
-  for an exact match on a category/boolean, `from`/`to` for a numeric range — never both on the
-  same condition) and the amount for that row. A flat fee with no banding is a single variant with
-  no conditions. Set referencesComponents even here if the source text says this must be computed
-  after another component purely for ordering, without actually reading that component's value
-  (e.g. a flat cess still listed after the base licence fee in a tax/cess stack).
+  for an exact match on a category/boolean, `from`/`to` for a numeric range, or leave BOTH unset if
+  the source text only requires the attribute to exist at all with no specific value — e.g. "an
+  add-on fee applies if a fire safety certificate is on file" names no required value, so don't
+  invent one; never set both equals and from/to on the same condition) and the amount for that
+  row. A flat fee with no banding is a single variant with no conditions. Set referencesComponents
+  even here if the source text says this must be computed after another component purely for
+  ordering, without actually reading that component's value (e.g. a flat cess still listed after
+  the base licence fee in a tax/cess stack).
 - PER_UNIT: a rate multiplied by one raw numeric field, no repeating array. Set
   rateAppliesToAttribute to that field's name; variants holds the rate as `amount` (banded rates,
   like "different rate per size range", still use multiple variants here).
@@ -94,6 +97,9 @@ the fields that mechanism needs:
 - TIME_BASED: interest/penalty. Same as FORMULA, but valueSources typically includes a
   componentRef principal plus a raw time field (e.g. daysDelayed); referencesComponents should
   list every component this depends on for sequencing, including ones only used for ordering.
+
+Each PolicyValueSource must set EXACTLY ONE of suggestedJsonPath (a raw payload field) or
+referencesComponent (another component's computed amount) — never both, never neither.
 
 Always set: scheduleId, tradeNames (every trade/item this pattern applies to), sourceText (the
 verbatim quote), confidence (0-1). Also populate documentNotes with anything that doesn't belong

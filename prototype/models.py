@@ -21,6 +21,10 @@ class PolicyCondition(BaseModel):
     equals: Optional[Any] = None                      # exact match (string/bool/etc), e.g. category="RESTAURANT"
     from_: Optional[float] = Field(default=None, alias="from")   # numeric range, inclusive lower bound
     to: Optional[float] = None                         # numeric range, inclusive upper bound
+    # Leaving equals AND from/to both unset is valid, not incomplete -- a presence-only condition
+    # (the fee applies if this attribute exists at all, no specific value required), per
+    # AttributeCondition's own x-businessRules in calculation-engine-3.0.0.yaml. Not demonstrated
+    # by any of the 30 reference examples, found by reading the real schema directly instead.
     derivedFrom: Optional[str] = None                  # names another PolicyRule this bands on, instead of a raw field
     model_config = ConfigDict(populate_by_name=True)
 
@@ -103,7 +107,9 @@ class Slab(BaseModel):
 
 
 class CalculationRule(BaseModel):
-    module: Optional[str] = None
+    # No `module` field: the real schema marks it readOnly, resolved from the `{module}` path
+    # segment on write (POST /{module}/rules), never part of the request body. It's carried once,
+    # for the whole batch, on CalculationRuleSet instead -- see there.
     ruleType: Literal["RATE_MATRIX", "ADJUSTMENT", "PENALTY", "INTEREST", "TAX", "AGGREGATION"]
     component: str
     scope: Literal["ENTITY", "SUBENTITY"]
@@ -121,10 +127,13 @@ class CalculationRule(BaseModel):
     dependsOn: list[str] = []
     priority: int = 100
     roundOff: Literal["NONE", "NEAREST_1", "NEAREST_10", "NEAREST_100"] = "NEAREST_1"
+    isActive: bool = True
     effectiveFrom: str
     effectiveTo: Optional[str] = None
 
 
 class CalculationRuleSet(BaseModel):
+    module: str   # the {module} path segment every rule in this batch will be POSTed under, e.g.
+                  # "trade-license" -- one value per batch, not per rule (see CalculationRule)
     rules: list[CalculationRule]
     assumptions: list[str]
