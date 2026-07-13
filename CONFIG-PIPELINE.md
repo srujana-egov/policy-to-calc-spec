@@ -416,12 +416,29 @@ The wizard forces every *question* to be asked — it cannot force an *answer* t
 If someone genuinely forgets `accessories` exists, or forgets `RETURNED` has a `WITHDRAW` branch,
 asking "add another field?" or "anything else from here?" doesn't make them remember something
 they never thought of — that's not a wizard-vs-AI-agent problem, it's a limit of depending on one
-person's memory at all. The workflow question is somewhat better protected than the registry one,
-because it's anchored to a specific state already in view ("what else from *here*") rather than a
-completely open prompt — but neither is a guarantee. The real mitigation for *this* class of gap
-is a checklist drawn from similar existing schemas/workflows, or a legacy form/system's field list
-where one exists — giving the person something concrete to check against, not a blank memory to
-search.
+person's memory at all.
+
+That's not the end of the story, though — the preview step already built into both wizards (the
+rendered diagram for workflow, the summary table for registry) is a genuine, complementary
+mitigation, not just a final rubber stamp, and worth crediting properly rather than glossing over.
+Answering questions one at a time keeps you in a "generate the next answer" mode. Seeing the
+*whole* finished structure afterward — a diagram, a table — switches you into a "recognize what's
+off" mode, a different cognitive task that catches different mistakes. A visual asymmetry
+(`RETURNED` has one thin arrow out, `PENDING_REVIEW` has three) can catch the eye even without
+consciously auditing for it — closer to proofreading by reading your own writing back than by
+rewriting it from memory. The same applies to registry: a table of every field side by side, with
+a `required` column, makes it easier to notice "huh, `hasLiquorLicense` is optional but everything
+else near it is required — is that right?" than it was while defining each field in sequence.
+
+Still not a guarantee — someone can look at a lopsided diagram and still not register that
+anything's missing. The workflow question is also somewhat better protected than the registry one
+independent of the preview, because it's anchored to a specific state already in view ("what else
+from *here*") rather than a completely open prompt. Where the preview and the anchored question
+both fall short, the remaining mitigation is a checklist drawn from similar existing
+schemas/workflows, or a legacy form/system's field list where one exists — giving the person
+something concrete to check against, not a blank memory to search. Three layers, not one: forced
+questions during construction, a whole-structure preview after, and an external checklist for
+whatever both still miss.
 
 ## Cross-cutting notes
 
