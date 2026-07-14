@@ -16,12 +16,24 @@ like the other two prototypes.
 ## Spec found and verified
 
 **Update: `calculation-engine-3.0.0.yaml` — the real OpenAPI spec, confirmed from the platform
-team — has been found and this prototype has been re-verified against it field by field.** This
-closes the one gap `../workflow-prototype/` and `../registry-prototype/` never had (both were
-always verified against real Go source in `digitnxt/digit3`) — for most of this project's life, no
-Calculation Engine service could be found anywhere in the digitnxt org, and this model/validator
-were inherited from `../prototype/models.py`'s own earlier reconstruction, unverified. The real
-spec is now checked into `fixtures/real_world/calculation-engine-3.0.0.yaml`.
+team — has been found and this prototype has been re-verified against it field by field.** The
+real spec is now checked into `fixtures/real_world/calculation-engine-3.0.0.yaml`.
+
+**The honest history here is more interesting than "never found," and worth correcting rather than
+repeating:** this exact file already existed locally (in `~/Downloads`, dated 2026-07-10 —
+*before* this project's first commit) and was already used once, early on. `../DEMO.md` (this
+project's own earlier design doc) documents reading it "line by line" and states plainly that
+`../prototype/validate.py` — the direct ancestor of this prototype's own `validate.py` — "was
+written from [it], line by line." So the business rules this prototype inherited were never purely
+invented; they trace back to a real spec that was read once, carefully, days before this specific
+prototype existed. What actually happened is narrower and more mundane than "no such service could
+be found": later verification work (this prototype, `../registry-prototype/`,
+`../workflow-prototype/`) searched the `digitnxt` GitHub org for a Calculation Engine service and
+found nothing there — true, since this is a local file, not something in that org's repos — and
+that search result got summarized, inaccurately, as "no such spec exists anywhere," rather than
+"not in that org, but check `~/Downloads` or this project's own earlier docs first." The gap wasn't
+that the spec never existed; it's that later work didn't reconnect with material already used
+earlier in this same project. Named plainly here so it isn't repeated.
 
 **What the re-verification confirmed** (already correct, now checked rather than assumed):
 - The evaluation order in `simulate.py` (AGGREGATION → RATE_MATRIX → ADJUSTMENT →
@@ -191,11 +203,12 @@ mistake worked-example simulation exists to catch, including in the tool that ge
 ## Stress test against 30 real examples
 
 `calculation-rule-examples.pdf` — 30 real `CalculationRule` bodies, ordered simple-to-complex, each
-introducing one new concept — surfaced partway through this project. Unlike everything else in this
-prototype (inherited from `../prototype/`'s own reconstruction, never independently checked — see
-the caveat above), this document is treated as ground truth: its own worked arithmetic (e.g. "700,000
-pays 0.5% on the first 500,000 and 1% on the remaining 200,000") is checked directly against what
-`simulate.py` computes, not just structural shape.
+introducing one new concept — surfaced partway through this project, *before* the real OpenAPI spec
+above was found. At the time, it was the only real ground truth available for a model otherwise
+inherited from `../prototype/`'s own reconstruction and never independently checked; treated as
+ground truth in its own right, its worked arithmetic (e.g. "700,000 pays 0.5% on the first 500,000
+and 1% on the remaining 200,000") was checked directly against what `simulate.py` computes, not
+just structural shape.
 
 All 30 examples are in `fixtures/real_world/calculation_rule_examples.json`;
 `test_real_world_examples.py` (324 checks) verifies three things per example: it round-trips through
