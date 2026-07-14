@@ -81,14 +81,14 @@ def configure_state(builder: WorkflowBuilder, state_code: str) -> None:
         label = ask("  Name this action (e.g. 'Approve', 'Reject') -- or leave blank if you didn't mean to add one:")
         if not label:
             break
-        existing_codes = [c for c in builder.states if c != state_code]
-        target_desc = "an existing state" if existing_codes else "nothing existing yet"
-        goes_to_existing = False
-        if existing_codes:
-            goes_to_existing = ask_yes_no(
-                f"  Does '{label}' lead back to an existing state ({', '.join(existing_codes)}), "
-                f"or somewhere new?"
-            )
+        # Includes state_code itself -- a self-loop (an action that leads back to the very
+        # state it's defined on, e.g. a resubmission or an "adhoc" retry action) is a real,
+        # legitimate pattern, not an edge case to exclude.
+        existing_codes = list(builder.states.keys())
+        goes_to_existing = ask_yes_no(
+            f"  Does '{label}' lead back to an existing state ({', '.join(existing_codes)} -- "
+            f"could even be back to '{state.name}' itself), or somewhere new?"
+        )
         roles = ask_roles(label)
 
         if goes_to_existing:
