@@ -178,8 +178,7 @@ def test_wiz_07_delete_field_then_fix_dangling_unique_constraint():
     schema, leftover = run_schema_session_with(answers)
     check("wiz07-all-input-consumed", not leftover, leftover)
     check("wiz07-mistake-removed", "mistake" not in schema.definition.properties)
-    check("wiz07-unique-constraint-fixed", schema.definition.x_unique == [["name"]],
-          schema.definition.x_unique)
+    check("wiz07-unique-constraint-fixed", schema.x_unique == [["name"]], schema.x_unique)
 
 
 def test_wiz_08_rename_schema_code_via_offer_fix():

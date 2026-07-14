@@ -16,6 +16,7 @@ because the spec and the implementation disagree in several places (below).
 python3 test_schema_builder.py   # SchemaBuilder + validate.py, 21 checks
 python3 test_wizard.py           # the interactive layer itself, 28 checks
 python3 test_render.py           # the two table previews, 19 checks
+python3 test_write_path.py       # real HTTP paths against a throwaway local server, 20 checks
 ```
 
 ```
@@ -30,6 +31,16 @@ confirmation → write (one `POST /registry/v3/<code>/data` per record).
 Both phases use the same "fix one thing, don't restart everything" pattern the workflow wizard
 was given after finding that "no" at the confirmation gate used to discard the whole session:
 saying no offers a menu to redo/add/delete a field (or a record), rather than starting over.
+
+```
+python3 add_data.py [schema-code]
+```
+
+A separate entry point for a schema that already exists on the server — skips schema authoring
+entirely. Fetches the real definition via `GET /registry/v3/schema/:schemaCode` (needs
+`DIGIT_SERVER_URL`/`DIGIT_TENANT_ID`/`DIGIT_USER_ID` set; there's no dry-run form of this, since
+there's nothing to preview without knowing the real fields), then runs the same record-entry flow
+as `wizard.py`'s phase 2.
 
 ## Real discrepancies found between swagger.yaml / the README / the Postman collection and the
 ## actual Go implementation (why this exists instead of trusting the spec)
@@ -50,6 +61,24 @@ saying no offers a menu to redo/add/delete a field (or a record), rather than st
   shape) even though the schema itself had been created successfully seconds earlier at the
   correctly-shaped `/registry/v3/schema` endpoint. `write_records()` in `data_entry.py` now uses
   the verified route.
+- **`x-unique`/`x-indexes` are top-level fields on the create-schema *request body*, not nested
+  inside `definition` — the most consequential mismatch found, because it fails silently.** The
+  real `models.SchemaRequest` Go struct has `XUnique`/`XIndexes` as sibling fields of `Definition`
+  (which is typed `json.RawMessage` — an opaque blob server-side). `CreateSchema`'s handler does
+  `c.ShouldBindJSON(&request)` straight into that struct: anything nested inside the `definition`
+  JSON that isn't part of `SchemaDefinition` is inert, never populating the real `XUnique`/
+  `XIndexes` fields the server actually reads. The Postman collection's own example nests them
+  inside `definition`, which is why this was modeled wrong here initially — **any schema created
+  with an earlier version of this tool that included a unique constraint or an index almost
+  certainly did not get that constraint/index applied server-side**, despite the create call
+  returning `201 Created` (the server doesn't reject or warn about unrecognized keys inside the
+  raw `definition` blob, so the request "succeeds" while silently dropping the constraint). If you
+  created a schema before this fix and it needs real unique constraints or indexes, re-create it
+  or `PUT` an update with the corrected shape. `models.py`'s `SchemaRequest` now has `x_unique`/
+  `x_indexes` as top-level fields, matching the real struct; `test_write_path.py` asserts they
+  land at the top level of the actual JSON sent, not just that the Python objects compare equal
+  (structural-equality tests alone couldn't have caught this, since fixing the code and fixing the
+  test assertions together hides exactly this class of bug).
 - **Wrong auth header, in three places at once**: `swagger.yaml`, the README, *and* the project's
   own `Registry_Collection.json` (Postman) all document/send `X-Client-Id` as the actor header.
   The real middleware (`internal/middleware/middleware.go`) only reads `X-User-Id`. Sending the
@@ -90,6 +119,9 @@ saying no offers a menu to redo/add/delete a field (or a record), rather than st
   drive it directly.
 - `data_entry.py` — phase 2: one question per field per record, repeatable, table preview →
   confirm → write. Imports `ask`/`ask_yes_no`/`_registry_headers` from `wizard.py`.
+- `add_data.py` — standalone entry point for adding records to a schema that already exists on
+  the server: fetches it via `GET /registry/v3/schema/:schemaCode`, then reuses `data_entry.py`'s
+  flow. No schema authoring, no dry-run form.
 - `test_schema_builder.py` — a real example (`license-registry`, matching the registry service's
   own Postman collection payload) plus one test per completeness check.
 - `test_wizard.py` — the interactive layer (both phases), driven via a mocked `input()`, against

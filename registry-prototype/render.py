@@ -45,13 +45,13 @@ def render_schema_preview(schema: SchemaRequest, out_path: str) -> str:
         field_details[name] = json.loads(prop.model_dump_json(exclude_none=True))
 
     unique_html = ""
-    if definition.x_unique:
-        items = "".join(f"<li>{' + '.join(c)}</li>" for c in definition.x_unique)
+    if schema.x_unique:
+        items = "".join(f"<li>{' + '.join(c)}</li>" for c in schema.x_unique)
         unique_html = f"<h3>Must be unique across every record</h3><ul>{items}</ul>"
 
     index_html = ""
-    if definition.x_indexes:
-        items = "".join(f"<li>{i.fieldPath} ({i.method})</li>" for i in definition.x_indexes)
+    if schema.x_indexes:
+        items = "".join(f"<li>{i.fieldPath} ({i.method})</li>" for i in schema.x_indexes)
         index_html = f"<h3>Indexed for fast search/filter</h3><ul>{items}</ul>"
 
     html = f"""<!DOCTYPE html>

@@ -37,8 +37,8 @@ def test_01_license_registry_builds_and_validates():
           set(schema.definition.required) == {"licenseNumber", "holderName", "issueDate", "status"})
     check("01-status-enum", schema.definition.properties["status"].enum == ["ACTIVE", "SUSPENDED", "REVOKED"])
     check("01-issue-date-format", schema.definition.properties["issueDate"].format == "date")
-    check("01-unique-on-license-number", schema.definition.x_unique == [["licenseNumber"]])
-    check("01-index-on-status", schema.definition.x_indexes[0].fieldPath == "status")
+    check("01-unique-on-license-number", schema.x_unique == [["licenseNumber"]])
+    check("01-index-on-status", schema.x_indexes[0].fieldPath == "status")
 
 
 def test_02_camel_field_name():
@@ -76,14 +76,14 @@ def test_06_dangling_required_caught():
 
 def test_07_dangling_unique_constraint_caught():
     schema = SchemaRequest(schemaCode="x", definition=SchemaDefinition(
-        properties={"a": PropertyDef(type="string")}, **{"x-unique": [["a", "ghost"]]}))
+        properties={"a": PropertyDef(type="string")}), **{"x-unique": [["a", "ghost"]]})
     errors = validate_schema_request(schema)
     check("07-dangling-unique-caught", any("unique constraint references 'ghost'" in e for e in errors), errors)
 
 
 def test_08_dangling_index_caught():
     schema = SchemaRequest(schemaCode="x", definition=SchemaDefinition(
-        properties={"a": PropertyDef(type="string")}, **{"x-indexes": [IndexDef(fieldPath="ghost")]}))
+        properties={"a": PropertyDef(type="string")}), **{"x-indexes": [IndexDef(fieldPath="ghost")]})
     errors = validate_schema_request(schema)
     check("08-dangling-index-caught", any("index references 'ghost'" in e for e in errors), errors)
 

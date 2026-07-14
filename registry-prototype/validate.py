@@ -31,12 +31,12 @@ def validate_schema_request(schema: SchemaRequest) -> list[str]:
         if req not in field_names:
             errors.append(f"'{req}' is listed as required but is not a defined field")
 
-    for constraint in definition.x_unique or []:
+    for constraint in schema.x_unique or []:
         for field in constraint:
             if field not in field_names:
                 errors.append(f"unique constraint references '{field}', which is not a defined field")
 
-    for index in definition.x_indexes or []:
+    for index in schema.x_indexes or []:
         if index.fieldPath not in field_names:
             errors.append(f"index references '{index.fieldPath}', which is not a defined field")
 

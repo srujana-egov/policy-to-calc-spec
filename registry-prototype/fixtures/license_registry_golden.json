@@ -30,17 +30,17 @@
       "holderName",
       "issueDate",
       "status"
-    ],
-    "x-unique": [
-      [
-        "licenseNumber"
-      ]
-    ],
-    "x-indexes": [
-      {
-        "fieldPath": "status",
-        "method": "btree"
-      }
     ]
-  }
+  },
+  "x-unique": [
+    [
+      "licenseNumber"
+    ]
+  ],
+  "x-indexes": [
+    {
+      "fieldPath": "status",
+      "method": "btree"
+    }
+  ]
 }

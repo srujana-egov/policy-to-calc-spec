@@ -65,6 +65,8 @@ def test_write_01_schema_write_uses_registry_v3_schema():
     _CapturingHandler.response_body = {"success": True, "data": {"schemaCode": "x"}}
     b = SchemaBuilder("x")
     b.add_field("Name", "string", required=True)
+    b.add_unique_constraint(["name"])
+    b.add_index("name")
     schema = b.build()
 
     server, port = _run_server()
@@ -83,6 +85,18 @@ def test_write_01_schema_write_uses_registry_v3_schema():
     check("write01-tenant-header", req["headers"].get("X-Tenant-Id") == "t")
     check("write01-user-header", req["headers"].get("X-User-Id") == "u")
     check("write01-no-client-id-header", "X-Client-Id" not in req["headers"])
+    # x-unique/x-indexes must be top-level keys of the sent body, siblings of "definition" --
+    # not nested inside it. The real Go CreateSchema handler does c.ShouldBindJSON(&request)
+    # straight into a struct where XUnique/XIndexes are fields on the request itself; anything
+    # nested inside the "definition" JSON blob (which is just json.RawMessage server-side) is
+    # inert and silently ignored. A prior version of this code nested them wrong and every
+    # schema created with a unique constraint or index silently lost that constraint/index on
+    # the real server despite the create call succeeding with 201.
+    body = req["body"]
+    check("write01-x-unique-is-top-level", body.get("x-unique") == [["name"]], body)
+    check("write01-x-unique-not-nested-in-definition", "x-unique" not in body.get("definition", {}), body)
+    check("write01-x-indexes-is-top-level", body.get("x-indexes", [{}])[0].get("fieldPath") == "name", body)
+    check("write01-x-indexes-not-nested-in-definition", "x-indexes" not in body.get("definition", {}), body)
 
 
 def test_write_02_data_write_uses_registry_v3_schemacode_data_no_schema_segment():
@@ -130,6 +144,67 @@ def test_write_03_multiple_records_post_once_each():
           all(r["path"] == "/registry/v3/license-registry/data" for r in _CapturingHandler.received))
     check("write03-bodies-distinct",
           [r["body"] for r in _CapturingHandler.received] == [{"data": {"name": "Bob"}}, {"data": {"name": "Alice"}}])
+
+
+def test_write_04_fetch_schema_parses_real_response_shape():
+    """add_data.py's fetch_schema() against a mock server returning the real Go Schema struct's
+    JSON shape -- schemaCode/definition/x-unique/x-indexes as top-level sibling keys, plus extra
+    fields (id, version, isLatest, isActive, auditDetails) it must ignore."""
+    import add_data
+
+    class _GetHandler(http.server.BaseHTTPRequestHandler):
+        requested_path = None
+
+        def do_GET(self):
+            _GetHandler.requested_path = self.path
+            body = json.dumps({
+                "success": True,
+                "data": {
+                    "id": "11111111-1111-1111-1111-111111111111",
+                    "schemaCode": "license-registry",
+                    "version": 1,
+                    "definition": {
+                        "$schema": "https://json-schema.org/draft/2020-12/schema",
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {"licenseNumber": {"type": "string"}},
+                        "required": ["licenseNumber"],
+                    },
+                    "x-unique": [["licenseNumber"]],
+                    "x-indexes": [{"fieldPath": "licenseNumber", "method": "btree"}],
+                    "isLatest": True,
+                    "isActive": True,
+                    "auditDetails": {"createdBy": "u", "createdTime": 0},
+                },
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _GetHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with mock.patch.dict(os.environ, {
+            "DIGIT_SERVER_URL": f"http://127.0.0.1:{port}",
+            "DIGIT_TENANT_ID": "t", "DIGIT_USER_ID": "u",
+        }):
+            schema = add_data.fetch_schema("license-registry")
+    finally:
+        server.shutdown()
+
+    check("write04-correct-path", _GetHandler.requested_path == "/registry/v3/schema/license-registry",
+          _GetHandler.requested_path)
+    check("write04-schema-code", schema.schemaCode == "license-registry")
+    check("write04-field-parsed", "licenseNumber" in schema.definition.properties)
+    check("write04-unique-parsed", schema.x_unique == [["licenseNumber"]])
+    check("write04-index-parsed", schema.x_indexes[0].fieldPath == "licenseNumber")
 
 
 if __name__ == "__main__":

@@ -67,12 +67,12 @@ class SchemaBuilder:
         self.indexes.append(IndexDef(name=name, fieldPath=field_name, method=method))
 
     def build(self) -> SchemaRequest:
-        definition = SchemaDefinition(
-            properties=dict(self.properties),
-            required=list(self.required),
+        definition = SchemaDefinition(properties=dict(self.properties), required=list(self.required))
+        return SchemaRequest(
+            schemaCode=self.schema_code,
+            definition=definition,
             **{
                 "x-unique": self.unique_constraints or None,
                 "x-indexes": self.indexes or None,
             },
         )
-        return SchemaRequest(schemaCode=self.schema_code, definition=definition)
