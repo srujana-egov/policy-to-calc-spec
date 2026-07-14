@@ -11,6 +11,7 @@ directly against `digit-specs` `v3.0.0/workflow.yaml` (`ActionInput`, `StateInpu
 python3 test_workflow_builder.py   # WorkflowBuilder + validate.py, 16 checks
 python3 test_wizard.py             # the interactive layer itself, 39 checks
 python3 test_render.py             # the diagram renderer, 17 checks
+python3 test_write_path.py         # real HTTP path/headers/body/response against a mock server, 11 checks
 ```
 
 `test_workflow_builder.py` builds the real `trade-license-approval` example from `workflow.yaml`'s
@@ -34,6 +35,17 @@ behind, deleting the `INITIAL` state, an unknown fix target).
 (the SVG parses as well-formed XML, node/edge counts match the process, self-loops route into the
 backward lane without breaking anything) — previously only checked ad hoc during manual
 verification, now a permanent regression check.
+
+`test_write_path.py` drives `write_process_definition()`'s real (non-dry-run) branch against a
+throwaway local HTTP server, asserting the exact path/headers/body sent and that reading `code`
+from a flat top-level response doesn't crash. Added after two real bugs shipped in
+`../registry-prototype/` (a wrong URL segment, and a field silently landing in the wrong place in
+the JSON) that only every dry-run test in this project would have missed the same way — dry runs
+never send a real request, so a URL/shape mistake can't be caught by them. Before writing it, the
+route/headers/body-shape/response-shape were re-verified directly against real Go source
+(`api/routes.go`, `api/handlers/process_handler.go`, `internal/models/common.go`/`models.go` in
+`digitnxt/digit3`) rather than trusted from this project's own earlier notes — unlike registry,
+nothing was found wrong here, but it's now a checked fact instead of an assumption.
 
 ```
 python3 wizard.py
@@ -71,6 +83,8 @@ exact same simple HTTP pattern (same headers, same endpoint) directly, preservin
 - `test_wizard.py` — the interactive layer, driven via a mocked `input()`, against real fixtures
   and edge cases.
 - `test_render.py` — the diagram renderer: offline-safety and structural correctness.
+- `test_write_path.py` — the real-POST path (not just dry-run) against a throwaway local HTTP
+  server, asserting the exact path/headers/body/response-parsing, matching real Go source.
 - `fixtures/` — real production workflow configs used as regression fixtures: `bpa_original.json`
   (the actual DIGIT `businessService` config, in its native `state`/`actions`/`roles` shape),
   `*_session_input.txt` (the exact wizard answers that reproduce each one), `*_golden.json`
@@ -84,6 +98,3 @@ exact same simple HTTP pattern (same headers, same endpoint) directly, preservin
 - The BFS column layout is verified correct up to the real examples tested (14 states, self-loops
   and backward edges included) — not manually verified readable for an arbitrarily large or
   densely tangled workflow beyond that.
-- The real-POST path in `write_process_definition()` (as opposed to the dry-run path, which every
-  test exercises) has no automated test — it would need a mock HTTP server to check headers/body
-  without a live DIGIT environment.
