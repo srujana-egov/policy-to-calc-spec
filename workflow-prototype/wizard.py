@@ -12,8 +12,15 @@ from builder import WorkflowBuilder
 from validate import validate_process_definition
 
 
+class Cancelled(Exception):
+    """Raised when the user types quit/exit at any prompt -- caught once, at the top level."""
+
+
 def ask(prompt: str) -> str:
-    return input(prompt + " ").strip()
+    answer = input(prompt + " ").strip()
+    if answer.lower() in ("quit", "exit", "q"):
+        raise Cancelled
+    return answer
 
 
 def ask_yes_no(prompt: str) -> bool:
@@ -71,7 +78,9 @@ def configure_state(builder: WorkflowBuilder, state_code: str) -> None:
         return
 
     while True:
-        label = ask("  Name this action (e.g. 'Approve', 'Reject'):")
+        label = ask("  Name this action (e.g. 'Approve', 'Reject') -- or leave blank if you didn't mean to add one:")
+        if not label:
+            break
         existing_codes = [c for c in builder.states if c != state_code]
         target_desc = "an existing state" if existing_codes else "nothing existing yet"
         goes_to_existing = False
@@ -97,6 +106,7 @@ def configure_state(builder: WorkflowBuilder, state_code: str) -> None:
 
 def main():
     print("=== Workflow wizard ===")
+    print("(type 'quit' at any question to stop -- nothing is saved until the very end)\n")
     name = ask("What's this workflow called?")
     code = ask("Give it a short code (e.g. 'trade-license-approval'):")
     description = ask("One-line description (optional):")
@@ -104,7 +114,7 @@ def main():
 
     builder = WorkflowBuilder(name=name, code=code, description=description, sla_ms=overall_sla)
 
-    first_state_name = ask("What's the very first thing that happens?")
+    first_state_name = ask("What's the first stage of this process called? (e.g. 'Pending Review', 'Application Submitted')")
     first_code = builder.add_initial_state(first_state_name)
     print(f"  -> '{first_state_name}' is the INITIAL state ({first_code})")
     configure_state(builder, first_code)
@@ -129,4 +139,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Cancelled:
+        print("\nCancelled -- nothing was saved.")
+    except (KeyboardInterrupt, EOFError):
+        print("\n\nCancelled -- nothing was saved.")
