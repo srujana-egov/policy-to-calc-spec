@@ -4,8 +4,18 @@ This document scopes a broader picture than the rest of this repo. `DESIGN.md`/`
 cover one piece of a larger config puzzle — generating `CalculationRule` specs from a policy
 document or a structured form. This doc places that piece in context alongside two others:
 registering the real entity schema a config session is *for*, and configuring the workflow
-(states/actions) that governs it. None of Steps 2–4 below are built yet; this is architecture,
-not a built system, and should be read that way.
+(states/actions) that governs it.
+
+**Update: all three of Steps 2, 3, and 4 are now built**, each as its own sibling prototype
+(`registry-prototype/`, `calc-engine-prototype/`, `workflow-prototype/`) — the sections below
+describe the architecture as originally reasoned through, and mostly still match what was
+actually built; where a real build found something the design session got wrong or didn't
+anticipate, that prototype's own README documents it rather than silently updating history here.
+Step 3 specifically has *two* built paths now: `../prototype/` (the original `PolicyRule[]`-
+mediated pipeline, for the backlog of already-written policy documents) and
+`calc-engine-prototype/` (a fresh-authoring wizard with no intermediate stage, for someone
+deciding a fee schedule from scratch — see that prototype's README for why the two need different
+shapes despite targeting the same `CalculationRule[]` output).
 
 ## The four steps, at a glance
 
@@ -478,10 +488,16 @@ whatever both still miss.
 - **Both tracks end the same way**, deliberately: business-user review → confirmation gate +
   audit log → write to the real service. One safety pattern, applied twice, not two different
   ones.
-- **Nothing in Steps 2–4 is built.** This doc is architecture reasoned through in a design
-  session, verified against the real Registry service source and `calculation-engine-3.0.0.yaml`
-  where specifics were checkable — not a description of working code, unlike `DESIGN.md`/
-  `DEMO.md`'s Stage 2–5 (Chennai fixture), which are proven.
+- **Steps 2, 3, and 4 are all built now** (`registry-prototype/`, `calc-engine-prototype/` +
+  `../prototype/`, `workflow-prototype/`), each with its own automated test suite driven against
+  real fixtures. Two real discrepancies this design session's own "verified against the real
+  Registry service source" claim missed, only found once actually built and run live: the
+  registry service's data-write route doesn't nest under `/schema` the way the spec/Postman
+  examples show, and `x-unique`/`x-indexes` are top-level request fields, not nested inside
+  `definition` — see `registry-prototype/README.md` for the full account. No equivalent
+  real-source check was possible for the Calculation Engine — see
+  `calc-engine-prototype/README.md`'s opening section for why (no such service exists anywhere in
+  the digitnxt org to check against).
 - **Open, not resolved here:** the Step 1 certificate-type/module distinction, and whether Steps
   3 and 4 ever need to share data (a workflow action referencing an entity field, for instance —
   not designed for, and `x-ref-schema` in the Registry service is the most likely mechanism if

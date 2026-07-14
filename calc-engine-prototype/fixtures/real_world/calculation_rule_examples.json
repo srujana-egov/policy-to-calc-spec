@@ -1,0 +1,205 @@
+{
+  "_source": "calculation-rule-examples.pdf -- 30 real rule bodies for POST /{module}/rules, transcribed verbatim, ordered so each introduces exactly one new concept on top of the last.",
+  "examples": [
+    {"id": 1, "title": "A flat fee that always applies", "rule": {
+      "ruleType": "RATE_MATRIX", "component": "LICENSE_FEE", "scope": "ENTITY", "conditions": {},
+      "calculationType": "FLAT", "value": 500, "priority": 10, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 2, "title": "A percentage tax computed on that fee (SGST)", "rule": {
+      "ruleType": "TAX", "component": "SGST", "scope": "ENTITY", "conditions": {},
+      "calculationType": "PERCENTAGE", "value": 18, "appliesOn": {"componentRef": "LICENSE_FEE"},
+      "dependsOn": ["LICENSE_FEE"], "priority": 20, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 3, "title": "The second half of the same tax pair (CGST)", "rule": {
+      "ruleType": "TAX", "component": "CGST", "scope": "ENTITY", "conditions": {},
+      "calculationType": "PERCENTAGE", "value": 18, "appliesOn": {"componentRef": "LICENSE_FEE"},
+      "dependsOn": ["LICENSE_FEE"], "priority": 20, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 4, "title": "Exact-match condition on a raw payload field", "rule": {
+      "ruleType": "RATE_MATRIX", "component": "LICENSE_FEE", "scope": "ENTITY",
+      "conditions": {"category": {"jsonPath": "$.category", "equals": "x"}},
+      "calculationType": "FLAT", "value": 1000, "priority": 10, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 5, "title": "A boolean condition", "rule": {
+      "ruleType": "RATE_MATRIX", "component": "LIQUOR_ADDON_FEE", "scope": "ENTITY",
+      "conditions": {"hasLiquorLicense": {"jsonPath": "$.certificateDetail.hasLiquorLicense", "equals": true}},
+      "calculationType": "FLAT", "value": 2000, "priority": 10, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 6, "title": "A rebate that subtracts from another component", "rule": {
+      "ruleType": "ADJUSTMENT", "component": "OWNER_TYPE_REBATE", "scope": "ENTITY",
+      "conditions": {"ownerType": {"jsonPath": "$.ownerType", "equals": "ARMY"}},
+      "calculationType": "FLAT", "value": -500, "appliesOn": {"componentRef": "PROPERTY_TAX"},
+      "dependsOn": ["PROPERTY_TAX"], "priority": 40, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 7, "title": "A numeric band", "rule": {
+      "ruleType": "RATE_MATRIX", "component": "STAFFING_FEE", "scope": "ENTITY",
+      "conditions": {"employeeCount": {"jsonPath": "$.certificateDetail.employeeCount", "from": 10, "to": 24}},
+      "calculationType": "FLAT", "value": 1200, "priority": 10, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 8, "title": "A second band for the same component", "rule": {
+      "ruleType": "RATE_MATRIX", "component": "STAFFING_FEE", "scope": "ENTITY",
+      "conditions": {"employeeCount": {"jsonPath": "$.certificateDetail.employeeCount", "from": 25, "to": 100}},
+      "calculationType": "FLAT", "value": 3000, "priority": 10, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 9, "title": "A percentage adjustment banded on a raw field", "rule": {
+      "ruleType": "ADJUSTMENT", "component": "AGE_DEPRECIATION", "scope": "ENTITY",
+      "conditions": {"ageOfBuilding": {"jsonPath": "$.ageOfBuilding", "from": 30}},
+      "calculationType": "PERCENTAGE", "value": -10, "appliesOn": {"componentRef": "PROPERTY_TAX"},
+      "dependsOn": ["PROPERTY_TAX"], "priority": 40, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 10, "title": "Two conditions, both must match (AND)", "rule": {
+      "ruleType": "RATE_MATRIX", "component": "LICENSE_FEE", "scope": "ENTITY",
+      "conditions": {
+        "category": {"jsonPath": "$.category", "equals": "y"},
+        "employeeCount": {"jsonPath": "$.certificateDetail.employeeCount", "from": 100}
+      },
+      "calculationType": "PER_UNIT", "appliesOn": {"jsonPath": "$.certificateDetail.employeeCount"},
+      "value": 500, "priority": 5, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 11, "title": "Three conditions together -- a full rate-matrix row", "rule": {
+      "ruleType": "RATE_MATRIX", "component": "PROPERTY_TAX", "scope": "ENTITY",
+      "conditions": {
+        "zoneClass": {"jsonPath": "$.zoneClass", "equals": "A1"},
+        "floorNo": {"jsonPath": "$.floorNo", "from": 0, "to": 0},
+        "usageType": {"jsonPath": "$.usageType", "equals": "RESIDENTIAL"}
+      },
+      "calculationType": "PER_UNIT", "appliesOn": {"jsonPath": "$.area"}, "value": 2,
+      "priority": 10, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 12, "title": "Per-unit rate on a raw field (isolated)", "rule": {
+      "ruleType": "RATE_MATRIX", "component": "PROPERTY_TAX", "scope": "ENTITY", "conditions": {},
+      "calculationType": "PER_UNIT", "appliesOn": {"jsonPath": "$.area"}, "value": 2,
+      "priority": 10, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 13, "title": "Per-unit rate applied inside a repeating array", "rule": {
+      "ruleType": "RATE_MATRIX", "component": "ACCESSORY_REGISTRATION_FEE", "scope": "SUBENTITY",
+      "subEntityPath": "$.certificateDetail.accessories[*]",
+      "conditions": {"accessoryType": {"jsonPath": "type", "equals": "WEIGHING_SCALE"}},
+      "calculationType": "PER_UNIT", "appliesOn": {"jsonPath": "quantity"}, "value": 200,
+      "priority": 10, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 14, "title": "A two-tier slab", "rule": {
+      "ruleType": "RATE_MATRIX", "component": "PROPERTY_TAX", "scope": "ENTITY", "conditions": {},
+      "calculationType": "SLAB", "appliesOn": {"jsonPath": "$.propertyValue"},
+      "slabs": [{"from": 0, "to": 500000, "rate": 0.5}, {"from": 500000, "to": null, "rate": 1}],
+      "priority": 10, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 15, "title": "A three-tier slab in a completely different module", "rule": {
+      "ruleType": "RATE_MATRIX", "component": "WATER_USAGE_FEE", "scope": "ENTITY", "conditions": {},
+      "calculationType": "SLAB", "appliesOn": {"jsonPath": "$.usageDetail.kilolitersConsumed"},
+      "slabs": [{"from": 0, "to": 10, "rate": 0}, {"from": 10, "to": 50, "rate": 20}, {"from": 50, "to": null, "rate": 40}],
+      "priority": 10, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 16, "title": "CGST (tax-stack set)", "rule": {
+      "ruleType": "TAX", "component": "CGST", "scope": "ENTITY", "conditions": {},
+      "calculationType": "PERCENTAGE", "value": 9, "appliesOn": {"componentRef": "LICENSE_FEE"},
+      "dependsOn": ["LICENSE_FEE"], "priority": 20, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 17, "title": "SGST (tax-stack set)", "rule": {
+      "ruleType": "TAX", "component": "SGST", "scope": "ENTITY", "conditions": {},
+      "calculationType": "PERCENTAGE", "value": 9, "appliesOn": {"componentRef": "LICENSE_FEE"},
+      "dependsOn": ["LICENSE_FEE"], "priority": 20, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 18, "title": "Fire cess (a smaller percentage, same pattern)", "rule": {
+      "ruleType": "TAX", "component": "FIRE_CESS", "scope": "ENTITY", "conditions": {},
+      "calculationType": "PERCENTAGE", "value": 1, "appliesOn": {"componentRef": "LICENSE_FEE"},
+      "dependsOn": ["LICENSE_FEE"], "priority": 20, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 19, "title": "Cancer cess -- a flat amount, but still ordered after the fee", "rule": {
+      "ruleType": "TAX", "component": "CANCER_CESS", "scope": "ENTITY", "conditions": {},
+      "calculationType": "FLAT", "value": 50, "dependsOn": ["LICENSE_FEE"], "priority": 20,
+      "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 20, "title": "A second accessory type, different rate", "rule": {
+      "ruleType": "RATE_MATRIX", "component": "ACCESSORY_REGISTRATION_FEE", "scope": "SUBENTITY",
+      "subEntityPath": "$.certificateDetail.accessories[*]",
+      "conditions": {"accessoryType": {"jsonPath": "type", "equals": "GENERATOR"}},
+      "calculationType": "PER_UNIT", "appliesOn": {"jsonPath": "quantity"}, "value": 500,
+      "priority": 10, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 21, "title": "A sub-entity rule with multiple conditions", "rule": {
+      "ruleType": "RATE_MATRIX", "component": "PROPERTY_TAX", "scope": "SUBENTITY",
+      "subEntityPath": "$.units[*]",
+      "conditions": {
+        "floorNo": {"jsonPath": "floorNo", "from": 1, "to": 3},
+        "usageType": {"jsonPath": "usageType", "equals": "RESIDENTIAL"}
+      },
+      "calculationType": "PER_UNIT", "appliesOn": {"jsonPath": "area"}, "value": 2.5,
+      "priority": 10, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 22, "title": "Summing a field across all sub-entities", "rule": {
+      "ruleType": "AGGREGATION", "component": "TOTAL_ACCESSORY_COUNT", "scope": "SUBENTITY",
+      "subEntityPath": "$.certificateDetail.accessories[*]", "aggregateFunction": "SUM",
+      "sourceAttribute": {"jsonPath": "quantity"}, "targetAttribute": "numberOfAccessories",
+      "priority": 1, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 23, "title": "Counting sub-entities instead of summing a field", "rule": {
+      "ruleType": "AGGREGATION", "component": "FLOOR_COUNT", "scope": "SUBENTITY",
+      "subEntityPath": "$.units[*]", "aggregateFunction": "COUNT",
+      "sourceAttribute": {"jsonPath": "floorNo"}, "targetAttribute": "floorCount",
+      "priority": 1, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 24, "title": "Taking the maximum value across sub-entities", "rule": {
+      "ruleType": "AGGREGATION", "component": "TOP_FLOOR", "scope": "SUBENTITY",
+      "subEntityPath": "$.units[*]", "aggregateFunction": "MAX",
+      "sourceAttribute": {"jsonPath": "floorNo"}, "targetAttribute": "topFloor",
+      "priority": 1, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 25, "title": "Banding on an aggregated value, not a raw field", "rule": {
+      "ruleType": "ADJUSTMENT", "component": "BULK_ACCESSORY_SURCHARGE", "scope": "ENTITY",
+      "conditions": {"numberOfAccessories": {"derivedFrom": "TOTAL_ACCESSORY_COUNT", "from": 4}},
+      "calculationType": "FLAT", "value": 300, "appliesOn": {"componentRef": "LICENSE_FEE"},
+      "dependsOn": ["TOTAL_ACCESSORY_COUNT"], "priority": 40, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 26, "title": "A simple two-term formula", "rule": {
+      "ruleType": "RATE_MATRIX", "component": "PREMISES_SIZE_FEE", "scope": "ENTITY", "conditions": {},
+      "calculationType": "FORMULA",
+      "formulaVariables": {"size": {"jsonPath": "$.certificateDetail.sizeSqm"}},
+      "formulaLogic": {"+": [200, {"*": [{"var": "size"}, 15]}]},
+      "priority": 10, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 27, "title": "A formula with more than one variable", "rule": {
+      "ruleType": "RATE_MATRIX", "component": "COMBINED_ESTABLISHMENT_FEE", "scope": "ENTITY", "conditions": {},
+      "calculationType": "FORMULA",
+      "formulaVariables": {
+        "employees": {"jsonPath": "$.certificateDetail.employeeCount"},
+        "size": {"jsonPath": "$.certificateDetail.sizeSqm"}
+      },
+      "formulaLogic": {"+": [500, {"*": [{"var": "employees"}, 10]}, {"*": [{"var": "size"}, 5]}]},
+      "priority": 10, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 28, "title": "A formula with a branch inside it", "rule": {
+      "ruleType": "RATE_MATRIX", "component": "FIRE_SAFETY_FEE", "scope": "ENTITY", "conditions": {},
+      "calculationType": "FORMULA",
+      "formulaVariables": {
+        "fireSafetyClass": {"jsonPath": "$.certificateDetail.fireSafetyClass"},
+        "size": {"jsonPath": "$.certificateDetail.sizeSqm"}
+      },
+      "formulaLogic": {"*": [
+        {"var": "size"},
+        {"if": [{"==": [{"var": "fireSafetyClass"}, "A"]}, 10, 20]}
+      ]},
+      "priority": 10, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 29, "title": "Interest combining a componentRef and a raw payload field", "rule": {
+      "ruleType": "INTEREST", "component": "INTEREST", "scope": "ENTITY", "conditions": {},
+      "calculationType": "FORMULA",
+      "formulaVariables": {
+        "principal": {"componentRef": "PROPERTY_TAX"},
+        "daysDelayed": {"jsonPath": "$.paymentDetail.daysDelayed"}
+      },
+      "formulaLogic": {"*": [{"var": "principal"}, 0.00033, {"var": "daysDelayed"}]},
+      "dependsOn": ["PROPERTY_TAX"], "priority": 30, "effectiveFrom": "2024-04-01"
+    }},
+    {"id": 30, "title": "Penalty depending on two other computed components", "rule": {
+      "ruleType": "PENALTY", "component": "PENALTY", "scope": "ENTITY", "conditions": {},
+      "calculationType": "FORMULA",
+      "formulaVariables": {
+        "principal": {"componentRef": "PROPERTY_TAX"},
+        "interest": {"componentRef": "INTEREST"}
+      },
+      "formulaLogic": {"*": [{"+": [{"var": "principal"}, {"var": "interest"}]}, 0.02]},
+      "dependsOn": ["PROPERTY_TAX", "INTEREST"], "priority": 40, "effectiveFrom": "2024-04-01"
+    }}
+  ]
+}

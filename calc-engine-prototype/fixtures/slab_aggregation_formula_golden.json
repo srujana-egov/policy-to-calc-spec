@@ -1,0 +1,81 @@
+{
+  "module": "income-tax",
+  "rules": [
+    {
+      "ruleType": "RATE_MATRIX",
+      "component": "INCOME_TAX",
+      "scope": "ENTITY",
+      "conditions": {},
+      "calculationType": "SLAB",
+      "slabs": [
+        {
+          "from": 0,
+          "to": 250000,
+          "rate": 0
+        },
+        {
+          "from": 250000,
+          "to": 500000,
+          "rate": 5
+        },
+        {
+          "from": 500000,
+          "rate": 20
+        }
+      ],
+      "appliesOn": {
+        "jsonPath": "$.income"
+      },
+      "dependsOn": [],
+      "priority": 100,
+      "roundOff": "NEAREST_1",
+      "isActive": true,
+      "effectiveFrom": "2024-04-01"
+    },
+    {
+      "ruleType": "AGGREGATION",
+      "component": "TOTAL_INVESTMENTS",
+      "scope": "SUBENTITY",
+      "subEntityPath": "$.investments[*]",
+      "conditions": {},
+      "aggregateFunction": "SUM",
+      "sourceAttribute": {
+        "jsonPath": "amount"
+      },
+      "targetAttribute": "totalInvestments",
+      "dependsOn": [],
+      "priority": 1,
+      "roundOff": "NEAREST_1",
+      "isActive": true,
+      "effectiveFrom": "2024-04-01"
+    },
+    {
+      "ruleType": "RATE_MATRIX",
+      "component": "REBATE_CALC",
+      "scope": "ENTITY",
+      "conditions": {},
+      "calculationType": "FORMULA",
+      "formulaLogic": {
+        "*": [
+          {
+            "var": "total"
+          },
+          0.1
+        ]
+      },
+      "formulaVariables": {
+        "total": {
+          "componentRef": "TOTAL_INVESTMENTS"
+        }
+      },
+      "dependsOn": [
+        "TOTAL_INVESTMENTS"
+      ],
+      "priority": 100,
+      "roundOff": "NEAREST_1",
+      "isActive": true,
+      "effectiveFrom": "2024-04-01"
+    }
+  ],
+  "assumptions": []
+}

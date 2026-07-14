@@ -1,0 +1,37 @@
+{
+  "module": "trade-license",
+  "rules": [
+    {
+      "ruleType": "RATE_MATRIX",
+      "component": "BASE_FEE",
+      "scope": "ENTITY",
+      "conditions": {},
+      "calculationType": "FLAT",
+      "value": 2000,
+      "dependsOn": [],
+      "priority": 100,
+      "roundOff": "NEAREST_1",
+      "isActive": true,
+      "effectiveFrom": "2024-01-01"
+    },
+    {
+      "ruleType": "RATE_MATRIX",
+      "component": "CESS",
+      "scope": "ENTITY",
+      "conditions": {},
+      "calculationType": "PERCENTAGE",
+      "value": 5,
+      "appliesOn": {
+        "componentRef": "BASE_FEE"
+      },
+      "dependsOn": [
+        "BASE_FEE"
+      ],
+      "priority": 100,
+      "roundOff": "NEAREST_1",
+      "isActive": true,
+      "effectiveFrom": "2024-01-01"
+    }
+  ],
+  "assumptions": []
+}
