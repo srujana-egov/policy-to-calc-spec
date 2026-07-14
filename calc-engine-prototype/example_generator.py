@@ -1,12 +1,11 @@
 """Generates targeted worked examples for the confirmation preview -- what does this
 configuration actually compute for a representative scenario? Each example is chosen to exercise
 one specific decision the wizard's questions captured (a condition band, a slab tier, an
-aggregation threshold), not a random value. Per CONFIG-PIPELINE.md's own design for this pipeline:
-"business user sees all the generated rules ... + a few representative worked examples" -- this
-is the "a few worked examples" half, previously not wired in (render.py only showed the rule
-table). Lets someone notice "wait, a 1000 sq ft shop pays 2000 but 1000.01 sq ft pays 5000 -- did
-I mean to draw the line there?" instead of only reading rule definitions and mentally simulating
-them.
+aggregation threshold), not a random value. This pipeline's own design calls for "business user
+sees all the generated rules ... + a few representative worked examples" -- this is the "a few
+worked examples" half, previously not wired in (render.py only showed the rule table). Lets
+someone notice "wait, a 1000 sq ft shop pays 2000 but 1000.01 sq ft pays 5000 -- did I mean to
+draw the line there?" instead of only reading rule definitions and mentally simulating them.
 
 Reuses simulate.py (adapted from ../prototype/simulate.py) to actually compute each scenario's
 result, not just display the input -- a wrong boundary decision shows up as a visibly wrong

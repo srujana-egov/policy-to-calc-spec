@@ -1,7 +1,7 @@
-"""Phase 2: entering data records against an already-authored schema (../CONFIG-PIPELINE.md
-calls this 'as many data records as they need for this schema'). Same shape as wizard.py's
-schema phase: one question per field per record, a table preview, an explicit confirmation gate,
-and a targeted fix-one-record menu instead of discarding every record on "no".
+"""Phase 2: entering data records against an already-authored schema -- as many data records as
+they need for this schema. Same shape as wizard.py's schema phase: one question per field per
+record, a table preview, an explicit confirmation gate, and a targeted fix-one-record menu instead
+of discarding every record on "no".
 """
 
 from __future__ import annotations

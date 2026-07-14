@@ -1,7 +1,8 @@
 # Workflow configuration prototype
 
-Step 4 of `../CONFIG-PIPELINE.md` — the guided-question wizard that builds a DIGIT Workflow
-Service process definition, entirely offline, no external API or LLM required. Schema verified
+Step 4 of the config pipeline (see `../DEMO-2026-07-15.md`) — the guided-question wizard that
+builds a DIGIT Workflow Service process definition, entirely offline, no external API or LLM
+required. Schema verified
 directly against `digit-specs` `v3.0.0/workflow.yaml` (`ActionInput`, `StateInput`,
 `ProcessDefinitionInput`), not guessed.
 

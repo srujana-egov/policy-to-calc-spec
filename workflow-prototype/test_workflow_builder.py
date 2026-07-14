@@ -18,7 +18,7 @@ def check(name, condition, detail=""):
 def build_trade_license_approval() -> WorkflowBuilder:
     """The real example from digit-specs v3.0.0/workflow.yaml's own createProcessDefinition
     example -- built entirely through builder calls, mirroring exactly what the wizard transcript
-    in CONFIG-PIPELINE.md walks through."""
+    in ../DEMO-2026-07-15.md walks through."""
     b = WorkflowBuilder(name="Trade License Approval", code="trade-license-approval",
                          description="End-to-end approval workflow for trade license applications.",
                          sla_ms=432_000_000)

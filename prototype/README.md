@@ -1,7 +1,8 @@
 # Monday demo prototype
 
-Proves the core pipeline end to end for one document (Chennai Schedule I). See `../DESIGN.md`'s
-"Monday demo scope" section for what this is and isn't.
+Proves the core pipeline end to end for one document (Chennai Schedule I). See
+`../DEMO-2026-07-13.md`'s "Architecture (as built for the demo)" section for what this is and
+isn't.
 
 ## What's runnable right now, no API key needed
 
@@ -50,7 +51,8 @@ python3 -m venv .venv && .venv/bin/pip install anthropic openai
 
 - Scoped to Chennai Schedule I only — no "locate relevant spans" step, no multi-schedule
   `tradeCategory` handling, no Bissau case.
-- No MCP, confirmation gate, audit log, or Temporal — see `DESIGN.md` for where those fit later.
+- No MCP, confirmation gate, audit log, or Temporal — see `../DEMO-2026-07-13.md` for where those
+  fit later.
 - `simulate.py` is not full engine parity (no persistence, no tenant isolation) — it's the
   documented evaluation algorithm only, enough to prove a spec computes what the policy says.
 - `extract.py`/`synthesize.py` are untested against a live API in this environment (no working

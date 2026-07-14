@@ -3,7 +3,7 @@ AttributeBinding/CalculationRuleSet, matching fixtures/real_world/calculation-en
 
 Spec found and verified (see README.md's "Spec found and verified" section for the full account,
 including a real correction: this spec was never actually missing -- it was used once, early in
-this project, per ../DEMO.md's own account -- later work just didn't reconnect with that). This
+this project, per ../DEMO-2026-07-13.md's own account -- later work just didn't reconnect with that). This
 model was originally inherited from ../prototype/models.py and has now been re-verified field by
 field against the real OpenAPI schema (confirmed from the platform team). Two real, confirmed
 discrepancies were found this way and fixed: the real write path is `/calculation/v3/{module}/rules`

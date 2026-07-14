@@ -1,8 +1,11 @@
 """Generates a single, self-contained interactive HTML preview of a ProcessDefinitionInput --
 click a state to expand its SLA and every action's roles; click an arrow to see that one
 action's detail. Built for a non-technical business user: no JSON, no code, just boxes, arrows,
-and click-to-expand detail -- collapsed by default so the overall shape is readable at a glance,
-same reasoning as the "whole-structure preview" argument in CONFIG-PIPELINE.md.
+and click-to-expand detail -- collapsed by default so the overall shape is readable at a glance.
+Answering questions one at a time keeps you in a "generate the next answer" mode; seeing the
+*whole* finished structure afterward switches you into a "recognize what's off" mode, a different
+cognitive task that catches different mistakes -- a visual asymmetry (one thin arrow out of a
+state with three others) can catch the eye even without consciously auditing for it.
 
 Hand-rolled SVG layout, zero external dependencies -- no CDN script tag. An earlier version used
 vis-network loaded from a CDN, which silently rendered a blank page whenever the file was opened

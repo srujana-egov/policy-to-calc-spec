@@ -72,7 +72,7 @@ def list_schema_fields(schema_data: dict) -> list[str]:
 
 def field_to_json_path(field_path: str) -> str:
     """'address.city' -> '$.address.city' -- the `$.` convention already used throughout this
-    project's earlier CalculationRule work (../prototype/simulate.py, DEMO.md,
+    project's earlier CalculationRule work (../prototype/simulate.py, DEMO-2026-07-13.md,
     fixtures_generated/chennai_schedule_I_rules.json's own '$.tradeLicenseDetail.premisesArea').
     Idempotent: a path someone already typed with a '$.' prefix is returned unchanged, rather
     than doubled into '$.$.foo'."""

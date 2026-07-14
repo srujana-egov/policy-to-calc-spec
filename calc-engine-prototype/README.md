@@ -8,9 +8,11 @@ user can actually read, an explicit confirmation gate, and a real-or-dry-run wri
 
 This is a *third*, complementary path alongside `../prototype/`'s existing
 `PolicyRule[] -> CalculationRule[]` pipeline (built for the backlog of already-written policy
-documents — see `../CONFIG-PIPELINE.md`'s "Why `PolicyRule` stays as an intermediate" section for
-why that one keeps an intermediate stage). This prototype has no such intermediate, because there's
-no existing document to extract from — the wizard's own questions are the source of truth, exactly
+documents). That pipeline keeps `PolicyRule` as an intermediate for reasons specific to *that*
+problem: raw `CalculationRule` isn't reviewable by a business user, and decoupling the
+extraction form from `CalculationRule`'s own schema volatility means a spec change updates one
+mapper, not nine form screens. This prototype has no such intermediate, because there's no
+existing document to extract from — the wizard's own questions are the source of truth, exactly
 like the other two prototypes.
 
 ## Spec found and verified
@@ -21,7 +23,7 @@ real spec is now checked into `fixtures/real_world/calculation-engine-3.0.0.yaml
 
 **The honest history here is more interesting than "never found," and worth correcting rather than
 repeating:** this exact file already existed locally (in `~/Downloads`, dated 2026-07-10 —
-*before* this project's first commit) and was already used once, early on. `../DEMO.md` (this
+*before* this project's first commit) and was already used once, early on. `../DEMO-2026-07-13.md` (this
 project's own earlier design doc) documents reading it "line by line" and states plainly that
 `../prototype/validate.py` — the direct ancestor of this prototype's own `validate.py` — "was
 written from [it], line by line." So the business rules this prototype inherited were never purely
@@ -125,7 +127,7 @@ exact `$.path` deterministically (`field_to_json_path()`).
 
 This isn't a new convention invented for this prototype — `$.`-prefixed paths already appear
 throughout this project's earlier work: `../prototype/simulate.py`'s own docstring
-(`"$.tradeLicenseDetail.premisesArea"`), `../DEMO.md`, and the real
+(`"$.tradeLicenseDetail.premisesArea"`), `../DEMO-2026-07-13.md`, and the real
 `../prototype/fixtures_generated/chennai_schedule_I_rules.json` fixture. If the fetch fails (no
 server configured, network error, unknown schema code), the wizard falls back to manual path entry
 rather than crashing the session — confirmed by `test_wiz_11` in `test_wizard.py`.
@@ -153,8 +155,8 @@ now makes `calculationType` optional; `add_aggregation_rule` sets neither field.
 
 ## Worked examples in the preview, not just a rule table
 
-`CONFIG-PIPELINE.md`'s own design for this pipeline calls for the business-user review to include
-"a few representative worked examples," not just the generated rules — a rule table still requires
+This pipeline's own design calls for the business-user review to include "a few representative
+worked examples," not just the generated rules — a rule table still requires
 someone to mentally simulate the rules to know whether they're right. The confirmation preview now
 does this for real: `example_generator.py` picks up to 15 scenarios, each *targeted* at one
 specific decision the wizard's answers made (a condition boundary, a slab tier, an aggregation

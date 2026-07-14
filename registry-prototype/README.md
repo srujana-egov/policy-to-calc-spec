@@ -1,10 +1,11 @@
 # Registry configuration prototype
 
-Step 2 of `../CONFIG-PIPELINE.md` — a guided-question wizard that authors a DIGIT Registry schema,
-then a second phase that enters data records against it, entirely offline, no external API or
-LLM required. Same shape as `../workflow-prototype/`: a testable builder layer driven by both the
-interactive CLI and automated tests, a deterministic validate step, a preview a non-technical user
-can actually read, an explicit confirmation gate, and a real-or-dry-run write.
+Step 2 of the config pipeline (see `../DEMO-2026-07-15.md`) — a guided-question wizard that
+authors a DIGIT Registry schema, then a second phase that enters data records against it, entirely
+offline, no external API or LLM required. Same shape as `../workflow-prototype/`: a testable
+builder layer driven by both the interactive CLI and automated tests, a deterministic validate
+step, a preview a non-technical user can actually read, an explicit confirmation gate, and a
+real-or-dry-run write.
 
 Contract verified directly against the real Go source in `digitnxt/digit3`
 (`src/services/registry/internal/models`, handlers, DB migrations) — not just `swagger.yaml`,

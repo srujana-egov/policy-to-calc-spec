@@ -4,10 +4,10 @@ code, one branch per mechanism, no LLM call and no prompt.
 This replaces an earlier, LLM-based version of this file. That version existed because the
 PolicyRule[] it received came from extract.py's document-reading pipeline, where fields like
 suggestedJsonPath/subEntityHint were genuinely inferred guesses needing a model's judgment to
-turn into the target schema. That pipeline is out of scope now (see CONFIG-PIPELINE.md) --
-PolicyRule[] here comes from a structured form instead, where those same fields are already real,
-registry-confirmed values the user picked from a dropdown. There's nothing left to infer, only to
-translate field-for-field, which is exactly what plain code does more reliably than a model call.
+turn into the target schema. That pipeline is out of scope now -- PolicyRule[] here comes from a
+structured form instead, where those same fields are already real, registry-confirmed values the
+user picked from a dropdown. There's nothing left to infer, only to translate field-for-field,
+which is exactly what plain code does more reliably than a model call.
 
 The one thing this file still cannot produce deterministically: `formulaLogic` for FORMULA/
 TIME_BASED mechanisms. Turning `formulaHint`'s plain text ("200 + 15*size") into real, executable

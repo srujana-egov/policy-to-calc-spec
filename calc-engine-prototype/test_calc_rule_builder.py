@@ -41,7 +41,8 @@ def canonical_rules(rule_set) -> list[dict]:
 def build_chennai_schedule_i() -> CalculationRuleBuilder:
     """The real fixture from ../prototype/fixtures_generated/chennai_schedule_I_rules.json,
     reproduced entirely through builder calls -- FLAT_OR_BANDED mechanism, two variants sharing
-    one component, per the mapping table in ../CONFIG-PIPELINE.md."""
+    one component (one RATE_MATRIX/FLAT rule per variant, per ../prototype/synthesize.py's own
+    mapping)."""
     b = CalculationRuleBuilder("trade-license")
     b.add_flat_rule(
         "MICRO_COTTAGE_LICENSE_FEE", 2000,
