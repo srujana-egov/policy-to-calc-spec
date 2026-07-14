@@ -5,3 +5,4 @@ __pycache__/
 *.env
 workflow-prototype/*_preview.html
 registry-prototype/*_preview.html
+calc-engine-prototype/*_preview.html
