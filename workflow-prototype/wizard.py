@@ -8,7 +8,13 @@ Run: python wizard.py
 
 from __future__ import annotations
 
+import json
+import os
+import urllib.error
+import urllib.request
+
 from builder import WorkflowBuilder
+from render import render_html
 from validate import validate_process_definition
 
 
@@ -128,14 +134,55 @@ def main():
     process = builder.build()
     errors = validate_process_definition(process)
 
-    print("\n=== Result ===")
-    print(process.model_dump_json(indent=2, exclude_none=True))
     if errors:
-        print("\nVALIDATION FAILED:")
+        print("\nVALIDATION FAILED -- fix these before a preview would mean anything:")
         for e in errors:
             print(f"  - {e}")
-    else:
-        print("\nAll checks passed -- ready for POST /process/definition.")
+        return
+
+    preview_path = os.path.abspath(f"{process.code}_preview.html")
+    render_html(process, preview_path)
+    print(f"\nAll checks passed. Open this in a browser to review it visually:\n  {preview_path}")
+    print("(click any box for its SLA and every action's roles, or an arrow for that one action)")
+
+    if not ask_yes_no("\nDoes this look right? Confirm to write it"):
+        print("Not confirmed -- nothing was written. Re-run the wizard to make changes.")
+        return
+
+    write_process_definition(process)
+
+
+def write_process_definition(process) -> None:
+    server_url = os.environ.get("DIGIT_SERVER_URL")
+    jwt_token = os.environ.get("DIGIT_JWT_TOKEN")
+    tenant_id = os.environ.get("DIGIT_TENANT_ID")
+    user_id = os.environ.get("DIGIT_USER_ID")
+    body = process.model_dump_json(exclude_none=True).encode()
+
+    if not (server_url and jwt_token and tenant_id and user_id):
+        print("\n=== DRY RUN (DIGIT_SERVER_URL/DIGIT_JWT_TOKEN/DIGIT_TENANT_ID/DIGIT_USER_ID not "
+              "all set -- nothing sent) ===")
+        print("Would POST to: {server}/workflow/v3/process/definition")
+        print("Headers: Content-Type: application/json, Authorization: Bearer <token>, "
+              f"X-Tenant-ID: <tenant>, X-User-ID: <user>")
+        print("Body:")
+        print(process.model_dump_json(indent=2, exclude_none=True))
+        return
+
+    url = server_url.rstrip("/") + "/workflow/v3/process/definition"
+    req = urllib.request.Request(url, data=body, method="POST", headers={
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {jwt_token}",
+        "X-Tenant-ID": tenant_id,
+        "X-User-ID": user_id,
+    })
+    try:
+        with urllib.request.urlopen(req) as resp:
+            print(f"\nCreated -- {resp.status} {resp.reason}")
+            print(json.loads(resp.read())["code"], "is now live.")
+    except urllib.error.HTTPError as e:
+        print(f"\nWrite failed -- {e.code} {e.reason}")
+        print(e.read().decode(errors="replace"))
 
 
 if __name__ == "__main__":
