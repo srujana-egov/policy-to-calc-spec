@@ -150,12 +150,12 @@ def write_records(schema: SchemaRequest, records: list[dict]) -> None:
         print("\n=== DRY RUN (DIGIT_SERVER_URL/DIGIT_TENANT_ID/DIGIT_USER_ID not all set -- "
               "nothing sent) ===")
         for i, record in enumerate(records, start=1):
-            print(f"Would POST to: {{server}}/registry/v3/schema/{schema.schemaCode}/data")
+            print(f"Would POST to: {{server}}/registry/v3/{schema.schemaCode}/data")
             print(f"Record {i}:", json.dumps({"data": record}, indent=2))
         return
 
     server_url = os.environ["DIGIT_SERVER_URL"]
-    url = server_url.rstrip("/") + f"/registry/v3/schema/{schema.schemaCode}/data"
+    url = server_url.rstrip("/") + f"/registry/v3/{schema.schemaCode}/data"
     created = 0
     for i, record in enumerate(records, start=1):
         body = json.dumps({"data": record}).encode()

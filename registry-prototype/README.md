@@ -25,7 +25,7 @@ python3 wizard.py
 The actual interactive CLI. Phase 1 (schema authoring): questions → table preview → explicit
 confirmation → write (real `POST /registry/v3/schema` or a clearly-labeled dry run). Phase 2, if
 you say yes to adding data now: one question per field per record, repeatable, table preview →
-confirmation → write (one `POST /registry/v3/schema/<code>/data` per record).
+confirmation → write (one `POST /registry/v3/<code>/data` per record).
 
 Both phases use the same "fix one thing, don't restart everything" pattern the workflow wizard
 was given after finding that "no" at the confirmation gate used to discard the whole session:
@@ -38,6 +38,18 @@ saying no offers a menu to redo/add/delete a field (or a record), rather than st
   `README.md` both document `/registry/v1/...`. The real Gin router — variable literally named
   `v1` in the source, a copy-paste artifact — mounts everything at `/registry/v3/...`. Every
   request in this prototype uses `v3`.
+- **The data route drops the `schema` path segment entirely, contradicting swagger.yaml**: the
+  spec documents `/registry/v1/schema/{schemaCode}/data`. The real router
+  (`cmd/server/main.go`) mounts `schemaRoutes := v1.Group("/schema")` (schema CRUD) and
+  `dataRoutes := v1.Group("/:schemaCode/data")` as two *siblings* directly under `v1`
+  (`/registry/v3`) — data routes are **not** nested under `/schema` at all. The real path is
+  `/registry/v3/{schemaCode}/data`, not `/registry/v3/schema/{schemaCode}/data`. This one wasn't
+  caught by the initial research pass (which read the documented shape rather than verifying this
+  specific route against the router registration) and shipped as a real bug — a live write
+  returned a bare `404 page not found` (Gin's own "no route matched," not our app's JSON error
+  shape) even though the schema itself had been created successfully seconds earlier at the
+  correctly-shaped `/registry/v3/schema` endpoint. `write_records()` in `data_entry.py` now uses
+  the verified route.
 - **Wrong auth header, in three places at once**: `swagger.yaml`, the README, *and* the project's
   own `Registry_Collection.json` (Postman) all document/send `X-Client-Id` as the actor header.
   The real middleware (`internal/middleware/middleware.go`) only reads `X-User-Id`. Sending the
@@ -84,6 +96,10 @@ saying no offers a menu to redo/add/delete a field (or a record), rather than st
   the same real fixture and edge cases (cancel, invalid retries, redo/add/delete-and-fix-the-
   fallout for fields, redo/add/delete for records).
 - `test_render.py` — offline-safety and structural correctness for both previews.
+- `test_write_path.py` — the real-POST paths (not just dry-run) against a throwaway local HTTP
+  server, asserting the exact path/headers/body sent. Added after a live write 404'd because of
+  the missing-`/schema/`-segment bug above -- dry runs alone can't catch a URL-construction bug
+  since they never send a real request.
 - `fixtures/` — `license_registry_schema_session.txt`/`license_registry_data_session.txt` (the
   exact wizard answers), `license_registry_golden.json`/`license_registry_data_golden.json` (the
   verified output).
@@ -96,5 +112,3 @@ saying no offers a menu to redo/add/delete a field (or a record), rather than st
 - Schema *updates* (`PUT /registry/v3/schema/:schemaCode`, which bumps `version`) aren't modeled
   — this prototype only creates new schemas.
 - Async-persistence mode (see above) isn't handled by the write step.
-- The real-POST paths in `write_schema()`/`write_records()` have no automated test — only the
-  dry-run path is exercised, same gap noted in the workflow wizard's README.
