@@ -10,6 +10,12 @@ required sub-field, two unique constraints), and `PGR.ServiceCategory` (a real s
 containing a dot, which the original schema-code regex would have rejected).
 """
 
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import json
 from pathlib import Path
 
@@ -17,7 +23,7 @@ from builder import SchemaBuilder, camel_field_name
 from models import IndexDef, PropertyDef, SchemaDefinition, SchemaRequest
 from validate import validate_schema_request
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parent.parent / "fixtures"
 PASSED = []
 
 

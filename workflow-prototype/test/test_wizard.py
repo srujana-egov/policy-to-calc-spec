@@ -15,6 +15,12 @@ Two kinds of checks:
 
 from __future__ import annotations
 
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import contextlib
 import io
 import json
@@ -27,7 +33,7 @@ import wizard
 from builder import WorkflowBuilder
 from validate import validate_process_definition
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parent.parent / "fixtures"
 PASSED = []
 
 

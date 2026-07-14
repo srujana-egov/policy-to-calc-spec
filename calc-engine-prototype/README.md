@@ -90,13 +90,13 @@ what it confirmed and corrected on its own.
 ## What's runnable right now, no API key or live service needed
 
 ```
-python3 test_calc_rule_builder.py     # CalculationRuleBuilder + validate.py, 25 checks
-python3 test_formula_parser.py        # the arithmetic-to-JSON-Logic parser, 15 checks
-python3 test_example_generator.py     # the worked-examples generator, 16 checks
-python3 test_wizard.py                # the interactive layer itself, 24 checks
-python3 test_render.py                # the table preview + worked examples, 24 checks
-python3 test_write_path.py            # real HTTP paths against a throwaway local server, 17 checks
-python3 test_real_world_examples.py   # stress test against 30 real rule bodies, 324 checks
+python3 test/test_calc_rule_builder.py     # CalculationRuleBuilder + validate.py, 25 checks
+python3 test/test_formula_parser.py        # the arithmetic-to-JSON-Logic parser, 15 checks
+python3 test/test_example_generator.py     # the worked-examples generator, 16 checks
+python3 test/test_wizard.py                # the interactive layer itself, 24 checks
+python3 test/test_render.py                # the table preview + worked examples, 24 checks
+python3 test/test_write_path.py            # real HTTP paths against a throwaway local server, 17 checks
+python3 test/test_real_world_examples.py   # stress test against 30 real rule bodies, 324 checks
 ```
 
 ```
@@ -275,23 +275,23 @@ with a message safe to show a non-technical user, rather than silently guessing.
 - `wizard.py` — the interactive CLI: module → registry lookup → rules (looped) → table preview
   with worked examples → confirm → write. `run_session()` returns the built rule set, separate
   from the write step, so tests can drive it directly.
-- `test_calc_rule_builder.py` — the real Chennai Schedule I fixture (already proven in
+- `test/test_calc_rule_builder.py` — the real Chennai Schedule I fixture (already proven in
   `fixtures/real_world/`), reproduced exactly through builder calls, plus one test per
   completeness check.
-- `test_formula_parser.py` — every supported operator, precedence, and every rejection path.
-- `test_example_generator.py` — confirms scenarios are genuinely targeted (not random) and that
+- `test/test_formula_parser.py` — every supported operator, precedence, and every rejection path.
+- `test/test_example_generator.py` — confirms scenarios are genuinely targeted (not random) and that
   simulating them produces numerically sane results, including regression tests for each of the
   four bugs found while building this feature (see below).
-- `test_wizard.py` — the interactive layer, driven via a mocked `input()`, against real fixtures
+- `test/test_wizard.py` — the interactive layer, driven via a mocked `input()`, against real fixtures
   and edge cases (cancel, invalid retries, redo/add/delete-a-rule, rename the module, the registry
   field-picker against a mock server, and its fetch-failure fallback).
-- `test_render.py` — offline-safety and structural correctness, including the worked-examples
+- `test/test_render.py` — offline-safety and structural correctness, including the worked-examples
   section.
-- `test_write_path.py` — the real-POST path (not just dry-run) against a throwaway local HTTP
+- `test/test_write_path.py` — the real-POST path (not just dry-run) against a throwaway local HTTP
   server, plus the registry-schema `GET` fetch. Covers the two write-path bugs found via the real
   spec (missing `/calculation/v3` prefix, bulk-array body instead of one-`POST`-per-rule) and the
   mandatory-Bearer-token requirement (see "Spec found and verified" above).
-- `test_real_world_examples.py` — stress test against all 30 examples in
+- `test/test_real_world_examples.py` — stress test against all 30 examples in
   `calculation-rule-examples.pdf`: structural round-trip, per-module `validate.py` checks, and
   computed-arithmetic assertions matching the doc's own worked numbers (see "Stress test against 30
   real examples" above).

@@ -9,10 +9,10 @@ directly against `digit-specs` `v3.0.0/workflow.yaml` (`ActionInput`, `StateInpu
 ## What's runnable right now, no API key or live service needed
 
 ```
-python3 test_workflow_builder.py   # WorkflowBuilder + validate.py, 16 checks
-python3 test_wizard.py             # the interactive layer itself, 39 checks
-python3 test_render.py             # the diagram renderer, 17 checks
-python3 test_write_path.py         # real HTTP path/headers/body/response against a mock server, 11 checks
+python3 test/test_workflow_builder.py   # WorkflowBuilder + validate.py, 16 checks
+python3 test/test_wizard.py             # the interactive layer itself, 39 checks
+python3 test/test_render.py             # the diagram renderer, 17 checks
+python3 test/test_write_path.py         # real HTTP path/headers/body/response against a mock server, 11 checks
 ```
 
 `test_workflow_builder.py` builds the real `trade-license-approval` example from `workflow.yaml`'s
@@ -80,11 +80,11 @@ exact same simple HTTP pattern (same headers, same endpoint) directly, preservin
 - `wizard.py` — the interactive CLI: questions → diagram → confirmation → write (real or dry-run).
   `run_session()` holds the whole question sequence and returns the built process, separate from
   `main()`'s write step, so tests can drive it directly.
-- `test_workflow_builder.py` — the real example plus one test per completeness check.
-- `test_wizard.py` — the interactive layer, driven via a mocked `input()`, against real fixtures
+- `test/test_workflow_builder.py` — the real example plus one test per completeness check.
+- `test/test_wizard.py` — the interactive layer, driven via a mocked `input()`, against real fixtures
   and edge cases.
-- `test_render.py` — the diagram renderer: offline-safety and structural correctness.
-- `test_write_path.py` — the real-POST path (not just dry-run) against a throwaway local HTTP
+- `test/test_render.py` — the diagram renderer: offline-safety and structural correctness.
+- `test/test_write_path.py` — the real-POST path (not just dry-run) against a throwaway local HTTP
   server, asserting the exact path/headers/body/response-parsing, matching real Go source.
 - `fixtures/` — real production workflow configs used as regression fixtures: `bpa_original.json`
   (the actual DIGIT `businessService` config, in its native `state`/`actions`/`roles` shape),

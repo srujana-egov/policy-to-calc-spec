@@ -3,6 +3,12 @@ and confirm it validates cleanly and matches the expected shape, (2) confirm eve
 check in validate.py actually catches its corresponding broken case, not just in theory.
 """
 
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from builder import WorkflowBuilder
 from models import ProcessDefinitionInput, StateInput, ActionInput
 from validate import validate_process_definition

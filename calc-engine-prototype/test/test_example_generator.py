@@ -6,6 +6,12 @@ this feature exists to catch (see test_05/test_06 below, both real bugs found wh
 this very file).
 """
 
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from builder import CalculationRuleBuilder
 from example_generator import build_baseline_payload, generate_scenarios, run_scenarios
 

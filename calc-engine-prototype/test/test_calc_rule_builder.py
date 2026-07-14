@@ -4,6 +4,12 @@ role -- a real example (the actual Chennai Schedule I fixture, already proven in
 fixtures/real_world/) built entirely through builder calls, plus one test per completeness check.
 """
 
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import json
 from pathlib import Path
 
@@ -11,7 +17,7 @@ from builder import CalculationRuleBuilder
 from models import AttributeBinding, AttributeCondition, CalculationRule, CalculationRuleSet, Slab
 from validate import validate_rule_set, validate_rule_set_models
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parent.parent / "fixtures"
 PASSED = []
 
 

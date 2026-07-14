@@ -7,6 +7,12 @@ a person's keystrokes would hit.
 
 from __future__ import annotations
 
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import contextlib
 import http.server
 import io
@@ -20,7 +26,7 @@ from unittest import mock
 import wizard
 from builder import CalculationRuleBuilder
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parent.parent / "fixtures"
 PASSED = []
 
 

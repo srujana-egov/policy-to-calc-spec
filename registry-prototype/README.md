@@ -22,10 +22,10 @@ regex would have rejected — see "Real discrepancies found" below.
 ## What's runnable right now, no API key or live service needed
 
 ```
-python3 test_schema_builder.py   # SchemaBuilder + validate.py, 39 checks
-python3 test_wizard.py           # the interactive layer itself, 37 checks
-python3 test_render.py           # the two table previews, 37 checks
-python3 test_write_path.py       # real HTTP paths against a throwaway local server, 20 checks
+python3 test/test_schema_builder.py   # SchemaBuilder + validate.py, 39 checks
+python3 test/test_wizard.py           # the interactive layer itself, 37 checks
+python3 test/test_render.py           # the two table previews, 37 checks
+python3 test/test_write_path.py       # real HTTP paths against a throwaway local server, 20 checks
 ```
 
 ```
@@ -212,16 +212,16 @@ as `wizard.py`'s phase 2.
 - `add_data.py` — standalone entry point for adding records to a schema that already exists on
   the server: fetches it via `GET /registry/v3/schema/:schemaCode`, then reuses `data_entry.py`'s
   flow. No schema authoring, no dry-run form.
-- `test_schema_builder.py` — real examples (`license-registry`, `trade-license`, `pgr2`,
+- `test/test_schema_builder.py` — real examples (`license-registry`, `trade-license`, `pgr2`,
   `PGR.ServiceCategory`) plus one test per completeness check. `canonicalize_real_world()`/
   `canonicalize_built()` strip fields this prototype deliberately doesn't model before comparing.
-- `test_wizard.py` — the interactive layer (both phases), driven via a mocked `input()`, against
+- `test/test_wizard.py` — the interactive layer (both phases), driven via a mocked `input()`, against
   the same real fixtures and edge cases (cancel, invalid retries, redo/add/delete-and-fix-the-
   fallout for fields, redo/add/delete for records, the real interactive nested-object flow against
   `trade-license`).
-- `test_render.py` — offline-safety and structural correctness for both previews, including
+- `test/test_render.py` — offline-safety and structural correctness for both previews, including
   nested-group display and pattern/min-max hints.
-- `test_write_path.py` — the real-POST paths (not just dry-run) against a throwaway local HTTP
+- `test/test_write_path.py` — the real-POST paths (not just dry-run) against a throwaway local HTTP
   server, asserting the exact path/headers/body sent. Added after a live write 404'd because of
   the missing-`/schema/`-segment bug above -- dry runs alone can't catch a URL-construction bug
   since they never send a real request.

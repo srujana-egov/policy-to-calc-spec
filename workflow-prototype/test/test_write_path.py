@@ -14,6 +14,12 @@ checked fact, not an assumption, and catches a future regression the same way
 
 from __future__ import annotations
 
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import http.server
 import json
 import os

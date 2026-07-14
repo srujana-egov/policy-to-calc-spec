@@ -6,6 +6,12 @@ cases, driven via a mocked input() against the exact code a person's keystrokes 
 
 from __future__ import annotations
 
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import contextlib
 import io
 import json
@@ -20,7 +26,7 @@ from builder import SchemaBuilder
 from test_schema_builder import canonicalize_built, canonicalize_real_world, load_real_world
 from validate import validate_schema_request
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parent.parent / "fixtures"
 PASSED = []
 
 

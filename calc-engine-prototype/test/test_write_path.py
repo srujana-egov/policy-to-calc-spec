@@ -17,6 +17,12 @@ registry-schema GET, by contrast, was already the same real, verified route prov
 
 from __future__ import annotations
 
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import http.server
 import json
 import os

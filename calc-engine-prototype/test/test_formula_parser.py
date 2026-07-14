@@ -2,6 +2,12 @@
 no eval(), no LLM, just an ast walk. Covers every supported operator, precedence/parentheses,
 and every rejection path (unsupported operator, undeclared variable, unparseable syntax)."""
 
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from formula_parser import FormulaParseError, parse_formula
 
 PASSED = []

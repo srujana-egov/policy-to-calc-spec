@@ -27,6 +27,12 @@ Two real, confirmed bugs found via this stress test, both fixed as part of build
 
 from __future__ import annotations
 
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import json
 from pathlib import Path
 
@@ -43,7 +49,7 @@ def check(name, condition, detail=""):
 
 
 EXAMPLES = {e["id"]: e["rule"] for e in
-            json.loads((Path(__file__).parent / "fixtures/real_world/calculation_rule_examples.json")
+            json.loads((Path(__file__).parent.parent / "fixtures/real_world/calculation_rule_examples.json")
                        .read_text())["examples"]}
 
 
