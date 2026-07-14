@@ -1,0 +1,74 @@
+Application Processing Workflow
+PGR67
+A complete workflow for application processing
+86400 seconds
+Init
+86400 seconds
+yes
+Apply
+no
+
+Pending For Assignment
+no
+43200 seconds
+yes
+Assign
+no
+
+Pending At LME
+yes
+Reject
+no
+
+Rejected
+no
+43200 seconds
+yes
+Resolve
+no
+
+Resolved
+yes
+Reassign
+no
+
+Pending For Reassignment
+no
+43200 seconds
+yes
+Reopen
+yes
+
+PENDING_FOR_ASSIGNMENT
+yes
+Rate
+no
+
+Closed After Rejection
+no
+43200 seconds
+yes
+Reopen
+yes
+
+PENDING_FOR_ASSIGNMENT
+yes
+Rate
+no
+
+Closed After Resolution
+no
+43200 seconds
+yes
+Reassign
+yes
+
+PENDING_AT_LME
+no
+0 seconds
+no
+no
+0 seconds
+no
+yes
+yes

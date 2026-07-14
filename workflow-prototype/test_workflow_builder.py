@@ -142,6 +142,18 @@ def test_10_correctly_built_workflow_has_no_false_positives():
     check("10-no-false-positives", not errors, errors)
 
 
+def test_11_initial_state_cannot_be_marked_terminal():
+    b = WorkflowBuilder(name="X", code="x")
+    initial = b.add_initial_state("Start")
+    raised = False
+    try:
+        b.mark_terminal(initial, success=True)
+    except ValueError:
+        raised = True
+    check("11-initial-terminal-blocked", raised)
+    check("11-initial-type-unchanged", b.states[initial].type == "INITIAL")
+
+
 if __name__ == "__main__":
     import sys
     test_functions = [v for k, v in list(globals().items()) if k.startswith("test_")]

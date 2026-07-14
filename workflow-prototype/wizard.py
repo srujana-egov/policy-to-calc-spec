@@ -78,10 +78,14 @@ def configure_state(builder: WorkflowBuilder, state_code: str) -> None:
 
     has_next = ask_yes_no(f"What can happen from '{state.name}'? Is there at least one next step?")
     if not has_next:
-        success = ask_yes_no("Is this a good outcome?")
-        builder.mark_terminal(state_code, success=success)
-        print(f"  -> marked {state.type}")
-        return
+        if state.type == "INITIAL":
+            print("  A process can't end at its very first stage -- there has to be at least "
+                  "one next step. Let's define what actually happens next.")
+        else:
+            success = ask_yes_no("Is this a good outcome?")
+            builder.mark_terminal(state_code, success=success)
+            print(f"  -> marked {state.type}")
+            return
 
     while True:
         label = ask("  Name this action (e.g. 'Approve', 'Reject') -- or leave blank if you didn't mean to add one:")
@@ -93,7 +97,7 @@ def configure_state(builder: WorkflowBuilder, state_code: str) -> None:
         existing_codes = list(builder.states.keys())
         goes_to_existing = ask_yes_no(
             f"  Does '{label}' lead back to an existing state ({', '.join(existing_codes)} -- "
-            f"could even be back to '{state.name}' itself), or somewhere new?"
+            f"could even be back to '{state.name}' itself)?"
         )
         roles = ask_roles(label)
 
@@ -164,7 +168,10 @@ def offer_fix(builder: WorkflowBuilder) -> None:
         print(f"  '{choice}' isn't a known state code -- nothing changed")
 
 
-def main():
+def run_session():
+    """Runs the full question sequence and returns the final, validated ProcessDefinitionInput.
+    Split out from main() so tests can drive the exact same interactive code path (via a mocked
+    input()) and inspect the result directly, instead of scraping printed output."""
     print("=== Workflow wizard ===")
     print("(type 'quit' at any question to stop -- nothing is saved until the very end)\n")
     name = ask("What's this workflow called?")
@@ -207,7 +214,11 @@ def main():
         print("Not confirmed -- let's fix just the part that's wrong (type 'quit' to stop entirely).")
         offer_fix(builder)
 
-    write_process_definition(process)
+    return process
+
+
+def main():
+    write_process_definition(run_session())
 
 
 def write_process_definition(process) -> None:

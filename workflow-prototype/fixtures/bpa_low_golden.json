@@ -1,0 +1,275 @@
+{
+  "code": "BPA_LOW",
+  "name": "Building Plan Approval (Low Risk)",
+  "description": "Building plan approval, low risk workflow",
+  "version": "1.0",
+  "sla": 5184000000,
+  "states": [
+    {
+      "code": "SEND_TO_CITIZEN",
+      "name": "Send To Citizen",
+      "type": "INITIAL",
+      "description": "",
+      "actions": [
+        {
+          "code": "SEND_TO_CITIZEN",
+          "label": "Send To Citizen",
+          "nextState": "CITIZEN_APPROVAL_PENDING",
+          "roles": [
+            "BPA_ARCHITECT",
+            "BPA_ENGINEER",
+            "BPA_BUILDER",
+            "BPA_STRUCTURALENGINEER",
+            "BPA_TOWNPLANNER",
+            "BPA_SUPERVISOR"
+          ],
+          "assigneeCheck": false
+        },
+        {
+          "code": "INITIATE",
+          "label": "Initiate",
+          "nextState": "SEND_TO_CITIZEN",
+          "roles": [
+            "BPA_ARCHITECT",
+            "BPA_ENGINEER",
+            "BPA_BUILDER",
+            "BPA_STRUCTURALENGINEER",
+            "BPA_TOWNPLANNER",
+            "BPA_SUPERVISOR"
+          ],
+          "assigneeCheck": false
+        }
+      ]
+    },
+    {
+      "code": "CITIZEN_APPROVAL_PENDING",
+      "name": "Citizen Approval Pending",
+      "type": "INTERMEDIATE",
+      "actions": [
+        {
+          "code": "APPROVE",
+          "label": "Approve",
+          "nextState": "IN_PROGRESS",
+          "roles": [
+            "CITIZEN"
+          ],
+          "assigneeCheck": false
+        },
+        {
+          "code": "SEND_TO_ARCHITECT",
+          "label": "Send To Architect",
+          "nextState": "SEND_TO_CITIZEN",
+          "roles": [
+            "CITIZEN"
+          ],
+          "assigneeCheck": false
+        }
+      ]
+    },
+    {
+      "code": "IN_PROGRESS",
+      "name": "In Progress",
+      "type": "INTERMEDIATE",
+      "actions": [
+        {
+          "code": "INITIATE",
+          "label": "Initiate",
+          "nextState": "IN_PROGRESS",
+          "roles": [
+            "BPA_ARCHITECT",
+            "BPA_ENGINEER",
+            "BPA_BUILDER",
+            "BPA_STRUCTURALENGINEER",
+            "BPA_TOWNPLANNER",
+            "BPA_SUPERVISOR"
+          ],
+          "assigneeCheck": false
+        },
+        {
+          "code": "APPLY",
+          "label": "Apply",
+          "nextState": "PENDING_FEE_PAYMENT",
+          "roles": [
+            "BPA_ARCHITECT",
+            "BPA_ENGINEER",
+            "BPA_BUILDER",
+            "BPA_STRUCTURALENGINEER",
+            "BPA_TOWNPLANNER",
+            "BPA_SUPERVISOR"
+          ],
+          "assigneeCheck": false
+        }
+      ]
+    },
+    {
+      "code": "PENDING_FEE_PAYMENT",
+      "name": "Pending Fee Payment",
+      "type": "INTERMEDIATE",
+      "actions": [
+        {
+          "code": "PAY",
+          "label": "Pay",
+          "nextState": "DOCUMENT_VERIFICATION_PENDING",
+          "roles": [
+            "CITIZEN",
+            "BPA_ARCHITECT",
+            "BPA_ENGINEER",
+            "BPA_BUILDER",
+            "BPA_STRUCTURALENGINEER",
+            "BPA_TOWNPLANNER",
+            "BPA_SUPERVISOR",
+            "SYSTEM_PAYMENT",
+            "CEMP"
+          ],
+          "assigneeCheck": false
+        },
+        {
+          "code": "SKIP_PAYMENT",
+          "label": "Skip Payment",
+          "nextState": "DOCUMENT_VERIFICATION_PENDING",
+          "roles": [
+            "CITIZEN",
+            "BPA_ARCHITECT",
+            "BPA_ENGINEER",
+            "BPA_BUILDER",
+            "BPA_STRUCTURALENGINEER",
+            "BPA_TOWNPLANNER",
+            "BPA_SUPERVISOR",
+            "SYSTEM_PAYMENT",
+            "CEMP"
+          ],
+          "assigneeCheck": false
+        },
+        {
+          "code": "ADHOC",
+          "label": "Adhoc",
+          "nextState": "PENDING_FEE_PAYMENT",
+          "roles": [
+            "CITIZEN",
+            "BPA_ARCHITECT",
+            "BPA_ENGINEER",
+            "BPA_BUILDER",
+            "BPA_STRUCTURALENGINEER",
+            "BPA_TOWNPLANNER",
+            "BPA_SUPERVISOR",
+            "SYSTEM_PAYMENT",
+            "CEMP"
+          ],
+          "assigneeCheck": false
+        }
+      ]
+    },
+    {
+      "code": "DOCUMENT_VERIFICATION_PENDING",
+      "name": "Document Verification Pending",
+      "type": "INTERMEDIATE",
+      "actions": [
+        {
+          "code": "FORWARD",
+          "label": "Forward",
+          "nextState": "FIELD_INSPECTION_PENDING",
+          "roles": [
+            "BPA_VERIFIER"
+          ],
+          "assigneeCheck": false
+        },
+        {
+          "code": "REVOCATE",
+          "label": "Revocate",
+          "nextState": "REVOCATED",
+          "roles": [
+            "BPA_VERIFIER"
+          ],
+          "assigneeCheck": false
+        }
+      ]
+    },
+    {
+      "code": "FIELD_INSPECTION_PENDING",
+      "name": "Field Inspection Pending",
+      "type": "INTERMEDIATE",
+      "actions": [
+        {
+          "code": "REVOCATE",
+          "label": "Revocate",
+          "nextState": "REVOCATED",
+          "roles": [
+            "BPA_FIELD_INSPECTOR"
+          ],
+          "assigneeCheck": false
+        },
+        {
+          "code": "FORWARD",
+          "label": "Forward",
+          "nextState": "NOC_VERIFICATION_PENDING",
+          "roles": [
+            "BPA_FIELD_INSPECTOR"
+          ],
+          "assigneeCheck": false
+        }
+      ]
+    },
+    {
+      "code": "REVOCATED",
+      "name": "Revocated",
+      "type": "TERMINAL_FAILURE",
+      "actions": []
+    },
+    {
+      "code": "NOC_VERIFICATION_PENDING",
+      "name": "NOC Verification Pending",
+      "type": "INTERMEDIATE",
+      "actions": [
+        {
+          "code": "REVOCATE",
+          "label": "Revocate",
+          "nextState": "REVOCATED",
+          "roles": [
+            "BPA_NOC_VERIFIER"
+          ],
+          "assigneeCheck": false
+        },
+        {
+          "code": "FORWARD",
+          "label": "Forward",
+          "nextState": "PENDING_APPROVAL",
+          "roles": [
+            "BPA_NOC_VERIFIER"
+          ],
+          "assigneeCheck": false
+        }
+      ]
+    },
+    {
+      "code": "PENDING_APPROVAL",
+      "name": "Pending Approval",
+      "type": "INTERMEDIATE",
+      "actions": [
+        {
+          "code": "REVOCATE",
+          "label": "Revocate",
+          "nextState": "REVOCATED",
+          "roles": [
+            "BPA_APPROVER"
+          ],
+          "assigneeCheck": false
+        },
+        {
+          "code": "APPROVE",
+          "label": "Approve",
+          "nextState": "APPROVED",
+          "roles": [
+            "BPA_APPROVER"
+          ],
+          "assigneeCheck": false
+        }
+      ]
+    },
+    {
+      "code": "APPROVED",
+      "name": "Approved",
+      "type": "TERMINAL_SUCCESS",
+      "actions": []
+    }
+  ]
+}

@@ -84,8 +84,14 @@ class WorkflowBuilder:
         return f"{candidate}_{i}"
 
     def mark_terminal(self, state_code: str, success: bool) -> None:
-        """'Nothing else happens here -- is this a good outcome or a bad outcome?'"""
+        """'Nothing else happens here -- is this a good outcome or a bad outcome?' Can't be
+        called on the INITIAL state: `type` holds a single value, so marking it terminal would
+        silently destroy the INITIAL designation, leaving the process with none at all -- not
+        representable in the real schema, and not something a process ever legitimately needs
+        (there's always at least one real first step)."""
         state = self.states[state_code]
+        if state.type == "INITIAL":
+            raise ValueError("the INITIAL state can't be terminal -- every process needs at least one step")
         state.type = "TERMINAL_SUCCESS" if success else "TERMINAL_FAILURE"
 
     def remove_state(self, state_code: str) -> None:

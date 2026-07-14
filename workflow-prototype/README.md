@@ -8,14 +8,32 @@ directly against `digit-specs` `v3.0.0/workflow.yaml` (`ActionInput`, `StateInpu
 ## What's runnable right now, no API key or live service needed
 
 ```
-python3 test_workflow_builder.py
+python3 test_workflow_builder.py   # WorkflowBuilder + validate.py, 16 checks
+python3 test_wizard.py             # the interactive layer itself, 39 checks
+python3 test_render.py             # the diagram renderer, 17 checks
 ```
 
-Builds the real `trade-license-approval` example from `workflow.yaml`'s own
-`createProcessDefinition` example entirely through `WorkflowBuilder` calls, confirms it validates
-clean, and confirms every completeness check in `validate.py` actually catches its corresponding
-broken case (missing/duplicate `INITIAL`, dead ends, unresolvable `nextState`, duplicate codes,
-unreachable states, terminal states with actions) — not just asserted to.
+`test_workflow_builder.py` builds the real `trade-license-approval` example from `workflow.yaml`'s
+own `createProcessDefinition` example entirely through `WorkflowBuilder` calls, confirms it
+validates clean, and confirms every completeness check in `validate.py` actually catches its
+corresponding broken case (missing/duplicate `INITIAL`, dead ends, unresolvable `nextState`,
+duplicate codes, unreachable states, terminal states with actions, marking the `INITIAL` state
+terminal) — not just asserted to.
+
+`test_wizard.py` drives `wizard.py`'s actual `input()`-driven code (via a mocked `input()`, not
+reimplemented) — the layer every real bug in this project has lived in, which the builder tests
+above never touch. Replays three real production configs (`BPA`, `BPA_LOW`, `PGR67`) from
+`fixtures/*_session_input.txt`, diffing the result against the real source config
+(`fixtures/bpa_original.json`) or a prior verified snapshot, plus edge cases: cancel-via-quit,
+invalid-input retries, self-loops, and the whole fix-one-thing-not-everything flow (redo a state,
+edit the workflow's own fields, delete a state and then fix the dangling reference it leaves
+behind, deleting the `INITIAL` state, an unknown fix target).
+
+`test_render.py` checks the diagram is genuinely dependency-free (greps the rendered HTML for
+`http://`/`https://`/`@import`/`fetch(`/`XMLHttpRequest`, all absent) and structurally correct
+(the SVG parses as well-formed XML, node/edge counts match the process, self-loops route into the
+backward lane without breaking anything) — previously only checked ad hoc during manual
+verification, now a permanent regression check.
 
 ```
 python3 wizard.py
@@ -43,15 +61,29 @@ exact same simple HTTP pattern (same headers, same endpoint) directly, preservin
   handling.
 - `validate.py` — deterministic completeness checks, no AI: exactly one `INITIAL` state, no dead
   ends, every `nextState` resolves, every state reachable from `INITIAL`, no duplicate codes.
-- `render.py` — generates the interactive HTML preview (vis-network via CDN for graph layout —
-  a solved problem, not reinvented here — with click-to-expand detail panels for roles/SLA).
+- `render.py` — generates the interactive HTML preview: hand-rolled SVG layout (BFS column
+  layering from `INITIAL`, backward/self-loop edges routed into their own lane below the
+  diagram), zero external dependencies — click-to-expand detail panels for roles/SLA.
 - `wizard.py` — the interactive CLI: questions → diagram → confirmation → write (real or dry-run).
+  `run_session()` holds the whole question sequence and returns the built process, separate from
+  `main()`'s write step, so tests can drive it directly.
 - `test_workflow_builder.py` — the real example plus one test per completeness check.
+- `test_wizard.py` — the interactive layer, driven via a mocked `input()`, against real fixtures
+  and edge cases.
+- `test_render.py` — the diagram renderer: offline-safety and structural correctness.
+- `fixtures/` — real production workflow configs used as regression fixtures: `bpa_original.json`
+  (the actual DIGIT `businessService` config, in its native `state`/`actions`/`roles` shape),
+  `*_session_input.txt` (the exact wizard answers that reproduce each one), `*_golden.json`
+  (a prior verified wizard run's output, for configs without an independent source doc to diff
+  against).
 
 ## What this doesn't do (out of scope, not forgotten)
 
 - `EscalationConfig` (per-state SLA escalation rules, Layer 3 in `workflow.yaml`) isn't modeled —
   this prototype covers process/state/action authoring only.
-- The diagram's graph layout is whatever `vis-network`'s hierarchical layout produces — fine for
-  the examples tested so far, not manually verified readable for an arbitrarily large/tangled
-  workflow.
+- The BFS column layout is verified correct up to the real examples tested (14 states, self-loops
+  and backward edges included) — not manually verified readable for an arbitrarily large or
+  densely tangled workflow beyond that.
+- The real-POST path in `write_process_definition()` (as opposed to the dry-run path, which every
+  test exercises) has no automated test — it would need a mock HTTP server to check headers/body
+  without a live DIGIT environment.

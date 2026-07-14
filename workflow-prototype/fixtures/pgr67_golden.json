@@ -1,0 +1,142 @@
+{
+  "code": "PGR67",
+  "name": "Application Processing Workflow",
+  "description": "A complete workflow for application processing",
+  "version": "1.0",
+  "sla": 86400000,
+  "states": [
+    {
+      "code": "INIT",
+      "name": "Init",
+      "type": "INITIAL",
+      "description": "",
+      "sla": 86400000,
+      "actions": [
+        {
+          "code": "APPLY",
+          "label": "Apply",
+          "nextState": "PENDING_FOR_ASSIGNMENT",
+          "roles": [],
+          "assigneeCheck": false
+        }
+      ]
+    },
+    {
+      "code": "PENDING_FOR_ASSIGNMENT",
+      "name": "Pending For Assignment",
+      "type": "INTERMEDIATE",
+      "sla": 43200000,
+      "actions": [
+        {
+          "code": "ASSIGN",
+          "label": "Assign",
+          "nextState": "PENDING_AT_LME",
+          "roles": [],
+          "assigneeCheck": false
+        },
+        {
+          "code": "REJECT",
+          "label": "Reject",
+          "nextState": "REJECTED",
+          "roles": [],
+          "assigneeCheck": false
+        }
+      ]
+    },
+    {
+      "code": "PENDING_AT_LME",
+      "name": "Pending At LME",
+      "type": "INTERMEDIATE",
+      "sla": 43200000,
+      "actions": [
+        {
+          "code": "RESOLVE",
+          "label": "Resolve",
+          "nextState": "RESOLVED",
+          "roles": [],
+          "assigneeCheck": false
+        },
+        {
+          "code": "REASSIGN",
+          "label": "Reassign",
+          "nextState": "PENDING_FOR_REASSIGNMENT",
+          "roles": [],
+          "assigneeCheck": false
+        }
+      ]
+    },
+    {
+      "code": "REJECTED",
+      "name": "Rejected",
+      "type": "INTERMEDIATE",
+      "sla": 43200000,
+      "actions": [
+        {
+          "code": "REOPEN",
+          "label": "Reopen",
+          "nextState": "PENDING_FOR_ASSIGNMENT",
+          "roles": [],
+          "assigneeCheck": false
+        },
+        {
+          "code": "RATE",
+          "label": "Rate",
+          "nextState": "CLOSED_AFTER_REJECTION",
+          "roles": [],
+          "assigneeCheck": false
+        }
+      ]
+    },
+    {
+      "code": "RESOLVED",
+      "name": "Resolved",
+      "type": "INTERMEDIATE",
+      "sla": 43200000,
+      "actions": [
+        {
+          "code": "REOPEN",
+          "label": "Reopen",
+          "nextState": "PENDING_FOR_ASSIGNMENT",
+          "roles": [],
+          "assigneeCheck": false
+        },
+        {
+          "code": "RATE",
+          "label": "Rate",
+          "nextState": "CLOSED_AFTER_RESOLUTION",
+          "roles": [],
+          "assigneeCheck": false
+        }
+      ]
+    },
+    {
+      "code": "PENDING_FOR_REASSIGNMENT",
+      "name": "Pending For Reassignment",
+      "type": "INTERMEDIATE",
+      "sla": 43200000,
+      "actions": [
+        {
+          "code": "REASSIGN",
+          "label": "Reassign",
+          "nextState": "PENDING_AT_LME",
+          "roles": [],
+          "assigneeCheck": false
+        }
+      ]
+    },
+    {
+      "code": "CLOSED_AFTER_REJECTION",
+      "name": "Closed After Rejection",
+      "type": "TERMINAL_FAILURE",
+      "sla": 0,
+      "actions": []
+    },
+    {
+      "code": "CLOSED_AFTER_RESOLUTION",
+      "name": "Closed After Resolution",
+      "type": "TERMINAL_SUCCESS",
+      "sla": 0,
+      "actions": []
+    }
+  ]
+}
