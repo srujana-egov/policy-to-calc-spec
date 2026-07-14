@@ -88,6 +88,16 @@ class WorkflowBuilder:
         state = self.states[state_code]
         state.type = "TERMINAL_SUCCESS" if success else "TERMINAL_FAILURE"
 
+    def remove_state(self, state_code: str) -> None:
+        """Drops a state that turned out to be a mistake. Any other state's action still
+        pointing at it becomes a dangling nextState -- validate.py already catches that, which
+        is what nudges a wizard user to go fix that other state next rather than silently
+        producing a broken graph."""
+        if self.states[state_code].type == "INITIAL":
+            raise ValueError("can't remove the INITIAL state -- every process needs exactly one")
+        del self.states[state_code]
+        self.queue = [c for c in self.queue if c != state_code]
+
     def next_unconfigured_state(self) -> str | None:
         """Drives the wizard's loop: which state still needs 'what can happen from here?'
         answered. Returns None once every queued state has been configured."""

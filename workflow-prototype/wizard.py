@@ -110,6 +110,60 @@ def configure_state(builder: WorkflowBuilder, state_code: str) -> None:
             break
 
 
+def redo_state(builder: WorkflowBuilder, state_code: str) -> None:
+    """Wipes one state's answers and re-asks its questions from scratch -- the targeted fix,
+    so a wrong role or transition doesn't force restarting the whole wizard."""
+    state = builder.states[state_code]
+    state.actions = []
+    state.sla = None
+    if state.type != "INITIAL":
+        state.type = "INTERMEDIATE"
+    configure_state(builder, state_code)
+
+
+def edit_process_fields(builder: WorkflowBuilder) -> None:
+    print(f"\n--- Fixing the workflow's own details (blank keeps the current value) ---")
+    name = ask(f"What's this workflow called? (currently '{builder.name}')")
+    if name:
+        builder.name = name
+    code = ask(f"Short code? (currently '{builder.code}')")
+    if code:
+        builder.code = code
+    description = ask(f"One-line description? (currently '{builder.description}')")
+    if description:
+        builder.description = description
+    if ask_yes_no(f"Change the overall SLA? (currently {builder.sla})"):
+        builder.sla = ask_sla_ms()
+
+
+def offer_fix(builder: WorkflowBuilder) -> None:
+    """The edit menu shown instead of discarding the whole session -- pick a state to redo,
+    the workflow's own name/code/SLA, or drop an unwanted state entirely."""
+    state_codes = ", ".join(builder.states.keys())
+    choice = ask(
+        "What do you want to fix? Type a state code to redo its questions, "
+        f"'delete STATE_CODE' to remove an unwanted state, or 'process' for the "
+        f"workflow's own name/code/description/SLA.\nStates: {state_codes}"
+    )
+    lowered = choice.lower()
+    if lowered == "process":
+        edit_process_fields(builder)
+    elif lowered.startswith("delete "):
+        target = choice.split(None, 1)[1].strip()
+        if target not in builder.states:
+            print(f"  '{target}' isn't a known state code -- nothing removed")
+        else:
+            try:
+                builder.remove_state(target)
+                print(f"  -> removed '{target}'")
+            except ValueError as e:
+                print(f"  {e}")
+    elif choice in builder.states:
+        redo_state(builder, choice)
+    else:
+        print(f"  '{choice}' isn't a known state code -- nothing changed")
+
+
 def main():
     print("=== Workflow wizard ===")
     print("(type 'quit' at any question to stop -- nothing is saved until the very end)\n")
@@ -131,23 +185,27 @@ def main():
             break
         configure_state(builder, pending)
 
-    process = builder.build()
-    errors = validate_process_definition(process)
+    while True:
+        process = builder.build()
+        errors = validate_process_definition(process)
 
-    if errors:
-        print("\nVALIDATION FAILED -- fix these before a preview would mean anything:")
-        for e in errors:
-            print(f"  - {e}")
-        return
+        if errors:
+            print("\nVALIDATION FAILED -- fix these before a preview would mean anything:")
+            for e in errors:
+                print(f"  - {e}")
+            offer_fix(builder)
+            continue
 
-    preview_path = os.path.abspath(f"{process.code}_preview.html")
-    render_html(process, preview_path)
-    print(f"\nAll checks passed. Open this in a browser to review it visually:\n  {preview_path}")
-    print("(click any box for its SLA and every action's roles, or an arrow for that one action)")
+        preview_path = os.path.abspath(f"{process.code}_preview.html")
+        render_html(process, preview_path)
+        print(f"\nAll checks passed. Open this in a browser to review it visually:\n  {preview_path}")
+        print("(click any box for its SLA and every action's roles, or an arrow for that one action)")
 
-    if not ask_yes_no("\nDoes this look right? Confirm to write it"):
-        print("Not confirmed -- nothing was written. Re-run the wizard to make changes.")
-        return
+        if ask_yes_no("\nDoes this look right? Confirm to write it"):
+            break
+
+        print("Not confirmed -- let's fix just the part that's wrong (type 'quit' to stop entirely).")
+        offer_fix(builder)
 
     write_process_definition(process)
 
