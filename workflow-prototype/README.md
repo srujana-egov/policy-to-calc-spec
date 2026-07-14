@@ -66,6 +66,33 @@ the write step — checked its actual source, and its client library's `ActionIn
 though the real server supports them. `write_process_definition()` in `wizard.py` replicates the
 exact same simple HTTP pattern (same headers, same endpoint) directly, preserving `roles` correctly.
 
+## Architecture — how the files connect
+
+```mermaid
+flowchart TD
+    models["models.py<br/>ActionInput/StateInput/<br/>ProcessDefinitionInput"]:::model
+    builder["builder.py<br/>WorkflowBuilder"]:::logic
+    validate["validate.py<br/>completeness checks"]:::logic
+    render["render.py<br/>interactive HTML diagram"]:::logic
+    wizard["wizard.py<br/>interactive CLI"]:::entry
+
+    builder --> models
+    render --> models
+    validate --> models
+    wizard --> builder
+    wizard --> render
+    wizard --> validate
+
+    classDef entry fill:#fde9d9,stroke:#b56a1f,color:#1a1a1a
+    classDef model fill:#e0e0e0,stroke:#666,color:#1a1a1a
+    classDef logic fill:#cfe3fb,stroke:#1b4d89,color:#1a1a1a
+```
+
+The simplest of the three prototypes' dependency graphs — a single entry point (`wizard.py`)
+pulling together three independently-testable, independently-importable modules, all resting on
+one shared data model. `test/*.py` imports directly from whichever of these modules it's testing,
+not shown above to keep this diagram to the library's own dependencies.
+
 ## Files
 
 - `models.py` — `ActionInput`/`StateInput`/`ProcessDefinitionInput`, matching the real spec exactly.

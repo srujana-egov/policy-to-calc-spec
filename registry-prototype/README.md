@@ -180,6 +180,46 @@ as `wizard.py`'s phase 2.
   example the way `pattern`/`minimum`/`maximum` are. `test_24` uses a synthetic (clearly labeled,
   not scraped) example rather than overstating this as a real-schema fixture.
 
+## Architecture — how the files connect
+
+```mermaid
+flowchart TD
+    models["models.py<br/>SchemaRequest/SchemaDefinition/<br/>PropertyDef/IndexDef/DataRequest"]:::model
+    builder["builder.py<br/>SchemaBuilder"]:::logic
+    validate["validate.py<br/>completeness checks"]:::logic
+    render["render.py<br/>schema + data table previews"]:::logic
+    wizard["wizard.py<br/>Phase 1: schema-authoring CLI<br/>(also holds shared ask()/ask_yes_no()/<br/>_registry_headers() helpers)"]:::entry
+    data_entry["data_entry.py<br/>Phase 2: data-entry CLI"]:::entry
+    add_data["add_data.py<br/>standalone entry point for a schema<br/>that already exists (skips Phase 1)"]:::entry
+
+    builder --> models
+    render --> models
+    validate --> models
+    wizard --> builder
+    wizard --> models
+    wizard --> render
+    wizard --> validate
+    data_entry --> models
+    data_entry --> render
+    data_entry -.->|reuses shared helpers| wizard
+    add_data --> data_entry
+    add_data --> models
+    add_data -.->|reuses shared helpers| wizard
+
+    classDef entry fill:#fde9d9,stroke:#b56a1f,color:#1a1a1a
+    classDef model fill:#e0e0e0,stroke:#666,color:#1a1a1a
+    classDef logic fill:#cfe3fb,stroke:#1b4d89,color:#1a1a1a
+```
+
+Three entry points, not one: `wizard.py` (author a schema, then optionally add data),
+`data_entry.py` (Phase 2 alone, imported by `add_data.py`), and `add_data.py` (skip authoring
+entirely for a schema that's already live). The dashed arrows are the one wrinkle worth naming —
+`data_entry.py` and `add_data.py` both reach back into `wizard.py` for its `ask()`/`ask_yes_no()`/
+`_registry_headers()` helpers rather than duplicating them, so `wizard.py` isn't purely "top of the
+graph" the way `wizard.py` is in the other two prototypes. `test/*.py` imports directly from
+whichever of these modules it's testing, not shown above to keep this diagram to the library's own
+dependencies.
+
 ## Files
 
 - `models.py` — `SchemaRequest`/`SchemaDefinition`/`PropertyDef`/`IndexDef`/`DataRequest`,

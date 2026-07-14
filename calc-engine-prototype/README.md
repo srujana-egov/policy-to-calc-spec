@@ -244,6 +244,43 @@ executes (`test_13_no_eval_used` in `test_formula_parser.py` confirms this direc
 `-`, `*`, `/`, unary minus, and parentheses; rejects anything else (function calls, comparisons)
 with a message safe to show a non-technical user, rather than silently guessing.
 
+## Architecture — how the files connect
+
+```mermaid
+flowchart TD
+    models["models.py<br/>CalculationRule/Slab/AttributeCondition/<br/>AttributeBinding/CalculationRuleSet"]:::model
+    builder["builder.py<br/>CalculationRuleBuilder"]:::logic
+    validate["validate.py<br/>business-rule checks<br/>(plain dicts, no models import)"]:::logic
+    simulate["simulate.py<br/>offline evaluator<br/>(plain dicts, no models import)"]:::logic
+    formula_parser["formula_parser.py<br/>arithmetic -> JSON Logic"]:::logic
+    registry_lookup["registry_lookup.py<br/>the $. field-reference mechanism"]:::logic
+    example_generator["example_generator.py<br/>worked-example scenarios"]:::logic
+    render["render.py<br/>HTML table + worked-examples preview"]:::logic
+    wizard["wizard.py<br/>interactive CLI"]:::entry
+
+    builder --> models
+    render --> models
+    example_generator --> simulate
+    wizard --> builder
+    wizard --> formula_parser
+    wizard --> models
+    wizard --> registry_lookup
+    wizard --> example_generator
+    wizard --> render
+    wizard --> validate
+
+    classDef entry fill:#fde9d9,stroke:#b56a1f,color:#1a1a1a
+    classDef model fill:#e0e0e0,stroke:#666,color:#1a1a1a
+    classDef logic fill:#cfe3fb,stroke:#1b4d89,color:#1a1a1a
+```
+
+`wizard.py` is the only file that pulls everything together — every other file is independently
+importable and independently tested. `validate.py`/`simulate.py` deliberately take plain `dict`s,
+not `models.py` instances, so they work the same whether the caller built a rule via the wizard,
+loaded one from `fixtures/real_world/`, or received one over HTTP. `test/*.py` imports directly
+from whichever of these modules it's testing (bypassing the CLI), not shown above to keep this
+diagram to the library's own dependencies.
+
 ## Files
 
 - `models.py` — `CalculationRule`/`Slab`/`AttributeCondition`/`AttributeBinding`/
