@@ -2,8 +2,9 @@
 adapted from ../prototype/simulate.py (kept as an independent copy rather than a cross-directory
 import, matching how the three sibling prototypes don't import from each other).
 
-From calculation-engine-3.0.0.yaml's /{module}/estimate description (as reconstructed -- see
-models.py's docstring on why this can't be independently re-verified):
+From fixtures/real_world/calculation-engine-3.0.0.yaml's /{module}/estimate description --
+confirmed against the real spec (see models.py's docstring), word for word the same order this
+file already implemented before the spec was found:
   1. AGGREGATION rules first (derive attributes from sub-entity arrays).
   2. RATE_MATRIX rules (SUBENTITY: once per array element; ENTITY: once against root + derived).
   3. ADJUSTMENT rules in ascending priority order (cumulative).
@@ -184,7 +185,10 @@ def _compute_slab(slabs: list[dict], value: float) -> float:
     500,000, 1% on the remaining 200,000' stores rate as 0.5/1 and only reproduces that stated
     result (2500 + 2000 = 4500) if rate is divided by 100 here -- matching PERCENTAGE's own
     convention. Without the /100, rate 0.5 on a 500,000 band computes 250,000 (50%), 100x too
-    large. Confirmed by the doc's own worked arithmetic, not assumed."""
+    large. Confirmed twice over, not assumed: the real OpenAPI spec's own Slab.x-businessRules
+    (fixtures/real_world/calculation-engine-3.0.0.yaml) states the identical worked example
+    verbatim -- '700000 against tiers [0-500000 @ rate 0.5][500000+ @ rate 1] pays rate 0.5 on
+    the first 500000 and rate 1 on the remaining 200000'."""
     total = 0.0
     for slab in sorted(slabs, key=lambda s: s["from"]):
         lo, hi, rate = slab["from"], slab.get("to"), slab["rate"]

@@ -13,28 +13,68 @@ why that one keeps an intermediate stage). This prototype has no such intermedia
 no existing document to extract from — the wizard's own questions are the source of truth, exactly
 like the other two prototypes.
 
-## The one honest caveat this project's other two prototypes don't have to make
+## Spec found and verified
 
-`../workflow-prototype/` and `../registry-prototype/` are both verified against **real Go source**
-in `digitnxt/digit3`. This one can't be: **no Calculation Engine service exists anywhere in the
-digitnxt org** — confirmed by listing `digitnxt/digit3`'s `src/services/` directory (no such
-service) and searching the whole org's code for "calculation-engine" (no hits). The actual
-`calculation-engine-3.0.0.yaml` spec file was never found saved anywhere in this repo either,
-despite being referenced by name throughout `../prototype/` and `../reference/`.
+**Update: `calculation-engine-3.0.0.yaml` — the real OpenAPI spec, confirmed from the platform
+team — has been found and this prototype has been re-verified against it field by field.** This
+closes the one gap `../workflow-prototype/` and `../registry-prototype/` never had (both were
+always verified against real Go source in `digitnxt/digit3`) — for most of this project's life, no
+Calculation Engine service could be found anywhere in the digitnxt org, and this model/validator
+were inherited from `../prototype/models.py`'s own earlier reconstruction, unverified. The real
+spec is now checked into `fixtures/real_world/calculation-engine-3.0.0.yaml`.
 
-This prototype's `CalculationRule` model, `validate.py`'s business rules, and the
-`POST /{module}/rules` write shape are all inherited from `../prototype/models.py` and
-`../prototype/validate.py` — this project's own earlier reconstruction of that spec, built before
-this repo's rule of "verify against real source" was established. Treated here as the best
-available ground truth, not an independently re-verified one. Where a real discrepancy might exist,
-it can't be checked — there's nothing real to check it against.
+**What the re-verification confirmed** (already correct, now checked rather than assumed):
+- The evaluation order in `simulate.py` (AGGREGATION → RATE_MATRIX → ADJUSTMENT →
+  PENALTY/INTEREST/TAX in `dependsOn` order) matches the spec's `/{module}/estimate` description
+  word for word.
+- `PERCENTAGE`'s `value` is percentage points (`9` = 9%, divided by 100) and `PER_UNIT`'s is a
+  plain multiplier (no division) — both match `CalculationType`'s own description.
+- `SLAB`'s `rate` divides by 100, exactly like `PERCENTAGE` — the spec's own `Slab.x-businessRules`
+  restates the identical worked example (`700000` against `[0-500000 @ 0.5][500000+ @ 1]` → `2500 +
+  2000`) already found and fixed via `calculation-rule-examples.pdf` (see below) — doubly confirmed.
+- `AttributeCondition`/`AttributeBinding`'s "exactly one of jsonPath-or-equivalent" shape, the
+  `AttributePath.Conflict` registration rule, `Slab`'s "only the final tier may omit `to`" rule, the
+  `dependsOn` DAG requirement, and "most-specific-match wins" for `RATE_MATRIX` all match exactly.
+- AGGREGATION rules genuinely have no `calculationType`/`value` — the spec's own "aggregation"
+  example under `POST /{module}/rules` omits both, matching what
+  `calculation-rule-examples.pdf`'s examples #22–24 already showed.
 
-One piece *is* independently verified, though: the `$.` field-reference mechanism (below) calls the
-real, already-proven `GET /registry/v3/schema/:schemaCode` route from `../registry-prototype/`.
+**Two real, confirmed bugs found and fixed by this re-verification** (in `wizard.py`'s
+`write_rules()`):
+1. **The real write path is `/calculation/v3/{module}/rules`, not bare `/{module}/rules`.** The
+   spec's own `servers:` block declares the base as `.../calculation/v3` — the same convention
+   already verified for registry (`/registry/v3`) and workflow (`/workflow/v3`). This prototype's
+   write path omitted the prefix entirely until now.
+2. **`POST` creates one rule per call — the request body is a single `CalculationRule` object, not
+   an array.** This prototype previously sent the *entire* rule set as one bulk-array body in a
+   single request. Fixed to loop, one `POST` per rule, matching the spec's `requestBody` schema and
+   its `201` response (a single created rule with `id`/`version`/`configVersion`/`auditDetail`).
+3. Separately: the spec requires `security: [BearerAuth: []]` on every operation with no
+   alternative — unlike registry/workflow, where a JWT is optional best-effort. `DIGIT_JWT_TOKEN`
+   is now required (not optional) to attempt a real write here; its absence forces a dry run.
 
-**Update: `calculation-rule-examples.pdf` (30 real rule bodies) surfaced and closed part of this
-gap.** It's not the missing OpenAPI spec, but it is a real, authoritative reference — see "Stress
-test against 30 real examples" below for what it confirmed and what it corrected.
+**One interesting spec-internal inconsistency, worth naming rather than silently working around:**
+the formal JSON-Schema `required` arrays are looser than the spec's own worked examples show —
+`CalculationRule.required` lists `calculationType` unconditionally, yet the spec's own
+"aggregation" example omits it; `AttributeCondition.required` lists `jsonPath` unconditionally, yet
+the spec's own "bulkSurchargeOnDerivedTotal" example sets only `derivedFrom`. Both times, the
+concrete example (and the prose `x-businessRules`) is right and the bare `required` array is
+overly strict boilerplate — this prototype follows the examples/prose, matching what
+`calculation-rule-examples.pdf` already independently confirmed.
+
+**What's still genuinely uncertain:** the exact literal header names behind the spec's
+`ClientId`/`ClientSecret`/`TimeStamp`/`RequestIdHeader`/`CorrelationIdHeader` parameters — they're
+`$ref`'d to a `digit-specs` `v3.0.0/common.yaml` this project doesn't have a confirmed local copy
+of. Not guessed; `wizard.py`'s `_calc_engine_headers()` sends only what's independently confirmed
+(`X-Tenant-Id`, `X-User-Id`, `Authorization: Bearer`) and documents this gap in its own docstring.
+
+The `$.` field-reference mechanism (below) was already independently verified regardless — it
+calls the real, already-proven `GET /registry/v3/schema/:schemaCode` route from
+`../registry-prototype/`.
+
+**Also part of this verification history: `calculation-rule-examples.pdf`** (30 real rule bodies,
+surfaced before the OpenAPI spec was found) — see "Stress test against 30 real examples" below for
+what it confirmed and corrected on its own.
 
 ## What's runnable right now, no API key or live service needed
 
@@ -44,7 +84,7 @@ python3 test_formula_parser.py        # the arithmetic-to-JSON-Logic parser, 15 
 python3 test_example_generator.py     # the worked-examples generator, 16 checks
 python3 test_wizard.py                # the interactive layer itself, 24 checks
 python3 test_render.py                # the table preview + worked examples, 24 checks
-python3 test_write_path.py            # real HTTP paths against a throwaway local server, 13 checks
+python3 test_write_path.py            # real HTTP paths against a throwaway local server, 17 checks
 python3 test_real_world_examples.py   # stress test against 30 real rule bodies, 324 checks
 ```
 
@@ -236,7 +276,9 @@ with a message safe to show a non-technical user, rather than silently guessing.
 - `test_render.py` — offline-safety and structural correctness, including the worked-examples
   section.
 - `test_write_path.py` — the real-POST path (not just dry-run) against a throwaway local HTTP
-  server, plus the registry-schema `GET` fetch.
+  server, plus the registry-schema `GET` fetch. Covers the two write-path bugs found via the real
+  spec (missing `/calculation/v3` prefix, bulk-array body instead of one-`POST`-per-rule) and the
+  mandatory-Bearer-token requirement (see "Spec found and verified" above).
 - `test_real_world_examples.py` — stress test against all 30 examples in
   `calculation-rule-examples.pdf`: structural round-trip, per-module `validate.py` checks, and
   computed-arithmetic assertions matching the doc's own worked numbers (see "Stress test against 30
@@ -244,12 +286,17 @@ with a message safe to show a non-technical user, rather than silently guessing.
 - `fixtures/` — `flat_percentage_session.txt`/`slab_aggregation_formula_session.txt` (exact wizard
   answers covering all 8 mechanisms across two sessions), `*_golden.json` (verified output),
   `real_world/chennai_schedule_I_rules.json` (copied from `../prototype/fixtures_generated/`),
-  `real_world/calculation_rule_examples.json` (all 30 examples from the PDF, transcribed verbatim).
+  `real_world/calculation_rule_examples.json` (all 30 examples from the PDF, transcribed verbatim),
+  `real_world/calculation-engine-3.0.0.yaml` (the real OpenAPI spec, confirmed from the platform
+  team).
 
 ## What this doesn't do (out of scope, not forgotten)
 
 - No schema *updates* — this prototype only creates new rule sets, matching
-  `../registry-prototype/`'s own create-only scope.
+  `../registry-prototype/`'s own create-only scope. The real spec does have `PUT`/`DELETE
+  /{module}/rules/{id}`, plus `GET .../attribute-paths`, `/estimate`, `/recalculate`, `/confirm`,
+  `/cancel`, and calculation-record search — none of those are implemented here; this prototype
+  only covers rule *authoring* (`POST /{module}/rules`), not the full calculation lifecycle.
 - `TIME_BASED` (interest/penalty reading day-count fields like `daysDelayed`) isn't a separate
   wizard option — per `../reference/calculation-rule-vocabulary.md`'s own note, the engine expects
   the caller to supply day-count fields directly; this prototype doesn't do date arithmetic.

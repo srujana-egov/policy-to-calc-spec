@@ -23,7 +23,7 @@ from builder import CalculationRuleBuilder
 from formula_parser import FormulaParseError, parse_formula
 from models import CalculationRuleSet
 from registry_lookup import (fetch_registry_schema, field_to_json_path, field_to_relative_path,
-                              list_schema_fields, registry_headers)
+                              list_schema_fields)
 from example_generator import generate_scenarios, run_scenarios
 from render import render_ruleset_preview
 from validate import validate_rule_set_models
@@ -556,36 +556,71 @@ def run_session() -> CalculationRuleSet:
     return rule_set
 
 
+CALC_ENGINE_PATH_PREFIX = "/calculation/v3"
+
+
 def _calc_engine_headers() -> dict[str, str] | None:
-    """Same env vars/header convention already verified for ../workflow-prototype/ and
-    ../registry-prototype/ -- but unverified here, since no real Calculation Engine service
-    exists anywhere in the digitnxt org to check this against (see models.py's docstring).
-    Best-effort, not confirmed."""
-    return registry_headers()
+    """Per fixtures/real_world/calculation-engine-3.0.0.yaml (the real OpenAPI spec, confirmed
+    from the platform team -- see README.md's "Spec found and verified" section): every operation
+    requires `security: [BearerAuth: []]`, with no alternative scheme, and tenantId is stated to
+    be "always resolved from the Bearer token" -- unlike ../registry-prototype/ and
+    ../workflow-prototype/, where a JWT is optional best-effort and X-User-Id/X-Tenant-Id headers
+    are what's actually verified against real Go source. So DIGIT_JWT_TOKEN is required here (not
+    optional as in registry_headers()), and its absence forces a dry run rather than sending an
+    unauthenticated request the real service would reject outright.
+
+    X-Tenant-Id/X-User-Id are still sent alongside the bearer token (harmless best-effort, matching
+    the other two prototypes' convention) but the exact literal header names the spec's own
+    ClientId/ClientSecret/TimeStamp/RequestIdHeader/CorrelationIdHeader parameters resolve to are
+    NOT sent -- they're $ref'd to a `digit-specs` v3.0.0/common.yaml this project doesn't have a
+    local, confirmed copy of. Deliberately not guessed."""
+    server_url = os.environ.get("DIGIT_SERVER_URL")
+    tenant_id = os.environ.get("DIGIT_TENANT_ID")
+    user_id = os.environ.get("DIGIT_USER_ID")
+    jwt_token = os.environ.get("DIGIT_JWT_TOKEN")
+    if not (server_url and tenant_id and user_id and jwt_token):
+        return None
+    return {
+        "Content-Type": "application/json",
+        "X-Tenant-Id": tenant_id,
+        "X-User-Id": user_id,
+        "Authorization": f"Bearer {jwt_token}",
+    }
 
 
 def write_rules(rule_set: CalculationRuleSet) -> None:
+    """POST /{module}/rules, once per rule -- not once for the whole set. Confirmed by the real
+    spec's requestBody schema (a single CalculationRule object, not an array) and its 201 response
+    (one created rule, with id/version/configVersion/auditDetail). An earlier version of this
+    prototype sent one request with the entire rule array as the body -- never independently
+    checked at the time, since no real spec was available; now known to be wrong."""
     headers = _calc_engine_headers()
-    body = json.dumps([r.model_dump(by_alias=True, exclude_none=True) for r in rule_set.rules]).encode()
+    rules_payload = [r.model_dump(by_alias=True, exclude_none=True) for r in rule_set.rules]
 
     if headers is None:
-        print("\n=== DRY RUN (DIGIT_SERVER_URL/DIGIT_TENANT_ID/DIGIT_USER_ID not all set -- "
-              "nothing sent) ===")
-        print(f"Would POST to: {{server}}/{rule_set.module}/rules")
-        print("Body:")
-        print(json.dumps([r.model_dump(by_alias=True, exclude_none=True) for r in rule_set.rules], indent=2))
+        print("\n=== DRY RUN (DIGIT_SERVER_URL/DIGIT_TENANT_ID/DIGIT_USER_ID/DIGIT_JWT_TOKEN not "
+              "all set -- nothing sent) ===")
+        print(f"Would send {len(rules_payload)} separate POST request(s) to: "
+              f"{{server}}{CALC_ENGINE_PATH_PREFIX}/{rule_set.module}/rules (one per rule)")
+        for rule_body in rules_payload:
+            print(json.dumps(rule_body, indent=2))
         return
 
     server_url = os.environ["DIGIT_SERVER_URL"]
-    url = server_url.rstrip("/") + f"/{rule_set.module}/rules"
-    req = urllib.request.Request(url, data=body, method="POST", headers=headers)
-    try:
-        with urllib.request.urlopen(req) as resp:
-            print(f"\nCreated -- {resp.status} {resp.reason}")
-            print(f"{len(rule_set.rules)} rule(s) for '{rule_set.module}' are now live.")
-    except urllib.error.HTTPError as e:
-        print(f"\nWrite failed -- {e.code} {e.reason}")
-        print(e.read().decode(errors="replace"))
+    url = server_url.rstrip("/") + f"{CALC_ENGINE_PATH_PREFIX}/{rule_set.module}/rules"
+    created = 0
+    for rule_body in rules_payload:
+        req = urllib.request.Request(url, data=json.dumps(rule_body).encode(), method="POST",
+                                      headers=headers)
+        try:
+            with urllib.request.urlopen(req) as resp:
+                created += 1
+                print(f"Created -- {resp.status} {resp.reason}: {rule_body['component']}")
+        except urllib.error.HTTPError as e:
+            print(f"Write failed for '{rule_body['component']}' -- {e.code} {e.reason}")
+            print(e.read().decode(errors="replace"))
+
+    print(f"\n{created}/{len(rules_payload)} rule(s) for '{rule_set.module}' are now live.")
 
 
 def main():

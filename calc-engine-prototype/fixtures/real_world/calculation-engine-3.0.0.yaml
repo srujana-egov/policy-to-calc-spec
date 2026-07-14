@@ -1,0 +1,2410 @@
+openapi: 3.0.3
+info:
+  title: Calculation Engine API
+  version: 3.0.0
+  description: 'REST APIs for generic tax and fee calculation across government modules (Property Tax, Trade License, Water Connection, Sewerage Connection, Building Permission, etc.).
+
+
+    ## Design summary
+
+
+    The engine never assumes a fixed payload shape. `/estimate` and `/confirm` accept the caller''s raw domain JSON as-is (`entityDetail`), whatever hierarchy it happens to be in. Every `CalculationRule` declares, inline, the JSONPath of only the attribute(s) it actually needs — there is no separate upfront entity-mapping resource to author, and no requirement to describe fields nobody uses.
+
+
+    To prevent silent drift (two rules quietly pointing at two different paths for what is supposed to be the same attribute), the engine lazily builds a per-module (attributeName → jsonPath) registry from whichever rule first references that name, and rejects, at write time (`409`), any later rule that reuses the same attribute name with a different path. Drift becomes a loud rejection when a rule is authored, never a silent missing line item at calculation time.
+
+
+    Sub-units of an entity (floors of a property, accessory items of a license, taps of a connection) are addressed the same way — a rule with `scope: SUBENTITY` declares the `subEntityPath` (a JSONPath resolving to the repeating array in the caller''s payload) once; every other rule sharing that `component` prefix must resolve to the same array, enforced by the same registry mechanism.
+
+
+    Rule types (`RATE_MATRIX`, `ADJUSTMENT`, `PENALTY`, `INTEREST`, `TAX`, `AGGREGATION`) and calculation types (`FLAT`, `PERCENTAGE`, `PER_UNIT`, `SLAB`, `FORMULA`) are data, not code — the engine has no hardcoded knowledge of any module''s vocabulary (floor, employee count, accessory type, pipe size — all just attribute names declared by rules).
+
+
+    FORMULA rules are evaluated as JSON Logic (see https://jsonlogic.com) — declarative, JSON-native, no custom parser, safe against injection. AGGREGATION rules derive an entity-level attribute (e.g. total accessory count) from a sum/count/max/min/avg over a sub-entity array, so downstream RATE_MATRIX/ADJUSTMENT rules can band on the derived total exactly as if it had been sent directly.
+
+
+    ## What this service does NOT own
+
+    - Demands, bills, payments, or receipts — forward `CalculationRecord.lineItems` to the billing service.
+
+    - Workflow/process state machines.
+
+    - Validation of the caller''s domain object schema — the engine only reads the paths its rules declare; it does not validate the rest of the payload.
+
+
+    ## Config versioning
+
+    Each `CalculationRule` carries two counters: `version` (bumped on every PUT, optimistic concurrency) and `configVersion` (bumped only when `breakingChange: true` is set — i.e. the rule''s amount/logic changed in a way that would alter results). `CalculationRecord` snapshots the `configVersion` and resolved `jsonPath` of every rule and attribute actually used, so an old, confirmed calculation can always be reconstructed exactly as computed, even after rules and payload shapes have since moved on.
+
+
+    ## Tenant isolation
+
+    `tenantId` is always resolved from the Bearer token and must not be sent in request bodies.
+
+    '
+servers:
+- url: https://api.example.com/calculation/v3
+  description: Production server
+- url: https://staging-api.example.com/calculation/v3
+  description: Staging server
+security:
+- BearerAuth: []
+tags:
+- name: Config
+  description: Manage per-tenant, per-module calculation rules (rate matrix, adjustment/rebate, penalty, interest, tax, and aggregation).
+- name: Calculation
+  description: Estimate, recalculate, confirm, and cancel tax/fee calculations against the caller's raw entity JSON.
+paths:
+  /{module}/rules:
+    post:
+      summary: Create a calculation rule
+      operationId: createCalculationRule
+      tags:
+      - Config
+      description: 'Creates a new calculation rule for a module + component under the calling tenant.
+
+
+        Each condition and formula variable declares its own `jsonPath` inline — only the attributes this rule actually needs. No separate entity-mapping resource is required.
+
+
+        **Path registration check (runs on every create/update):** for every attribute name referenced in `conditions` or `formulaVariables`, and for `subEntityPath` when `scope = SUBENTITY`, the engine checks whether that name is already registered for this module with a different path.
+
+        - First rule to use a name registers its `jsonPath` for (module, attributeName).
+
+        - Any later rule reusing that name with a **different** `jsonPath` is rejected with `409 AttributePath.Conflict`, naming the already-registered path.
+
+        - Reusing the name with the **same** `jsonPath` succeeds normally.
+
+
+        Returns `409 Rule.AlreadyExists` if an active rule already exists for the same (tenantId, module, component, conditions, effectiveFrom) combination — use PUT to update, or a new `effectiveFrom` to version it.
+
+        '
+      parameters:
+      - $ref: '#/components/parameters/RequestIdHeader'
+      - $ref: '#/components/parameters/CorrelationIdHeader'
+      - $ref: '#/components/parameters/UserAgentHeader'
+      - $ref: '#/components/parameters/TenantIdHeader'
+      - $ref: '#/components/parameters/ForwardedForHeader'
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/ClientSecret'
+      - $ref: '#/components/parameters/TimeStamp'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/ModulePath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CalculationRule'
+            examples:
+              rateMatrixEntityLevel:
+                summary: 'Trade license: staffing fee banded on employee count (entity-level, path registered here)'
+                value:
+                  ruleType: RATE_MATRIX
+                  component: STAFFING_FEE
+                  scope: ENTITY
+                  conditions:
+                    employeeCount:
+                      jsonPath: $.tradeLicenseDetail.employeeCount
+                      from: 10
+                      to: 24
+                  calculationType: FLAT
+                  value: 1200
+                  priority: 10
+                  effectiveFrom: '2024-04-01'
+              rateMatrixSubEntity:
+                summary: 'Trade license: per-accessory-type fee (sub-entity scope, iterates the accessories array)'
+                value:
+                  ruleType: RATE_MATRIX
+                  component: ACCESSORY_REGISTRATION_FEE
+                  scope: SUBENTITY
+                  subEntityPath: $.tradeLicenseDetail.accessories[*]
+                  conditions:
+                    accessoryType:
+                      jsonPath: type
+                      equals: WEIGHING_SCALE
+                  calculationType: PER_UNIT
+                  appliesOn:
+                    jsonPath: quantity
+                  value: 200
+                  priority: 10
+                  effectiveFrom: '2024-04-01'
+              aggregation:
+                summary: 'Trade license: derive total accessory count from the accessories array'
+                value:
+                  ruleType: AGGREGATION
+                  component: TOTAL_ACCESSORY_COUNT
+                  scope: SUBENTITY
+                  subEntityPath: $.tradeLicenseDetail.accessories[*]
+                  aggregateFunction: SUM
+                  sourceAttribute:
+                    jsonPath: quantity
+                  targetAttribute: numberOfAccessories
+                  priority: 1
+                  effectiveFrom: '2024-04-01'
+              bulkSurchargeOnDerivedTotal:
+                summary: Surcharge banded on the derived numberOfAccessories (registered by the aggregation rule above, reused here with the same canonical name — no jsonPath needed, it is not a raw-payload field)
+                value:
+                  ruleType: ADJUSTMENT
+                  component: BULK_ACCESSORY_SURCHARGE
+                  scope: ENTITY
+                  conditions:
+                    numberOfAccessories:
+                      derivedFrom: TOTAL_ACCESSORY_COUNT
+                      from: 4
+                  calculationType: FLAT
+                  value: 300
+                  appliesOn:
+                    componentRef: LICENSE_FEE
+                  dependsOn:
+                  - TOTAL_ACCESSORY_COUNT
+                  priority: 40
+                  effectiveFrom: '2024-04-01'
+              formulaPremisesFee:
+                summary: Formula fee using JSON Logic over two declared variables
+                value:
+                  ruleType: RATE_MATRIX
+                  component: PREMISES_SIZE_FEE
+                  scope: ENTITY
+                  conditions: {}
+                  calculationType: FORMULA
+                  formulaVariables:
+                    sizeOfPremiseSqm:
+                      jsonPath: $.tradeLicenseDetail.premises.sizeSqm
+                  formulaLogic:
+                    +:
+                    - 200
+                    - '*':
+                      - var: sizeOfPremiseSqm
+                      - 15
+                  priority: 20
+                  effectiveFrom: '2024-04-01'
+      responses:
+        '201':
+          description: Calculation rule created.
+          headers:
+            X-Response-Time:
+              $ref: '#/components/headers/X-Response-Time'
+            X-Response-Timestamp:
+              $ref: '#/components/headers/X-Response-Timestamp'
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-Correlation-ID:
+              $ref: '#/components/headers/X-Correlation-ID'
+            X-Tenant-ID:
+              $ref: '#/components/headers/X-Tenant-ID'
+            X-Rate-Limit:
+              $ref: '#/components/headers/X-Rate-Limit'
+            X-Rate-Limit-Remaining:
+              $ref: '#/components/headers/X-Rate-Limit-Remaining'
+            X-Rate-Limit-Reset:
+              $ref: '#/components/headers/X-Rate-Limit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalculationRule'
+              examples:
+                created:
+                  summary: STAFFING_FEE rule created
+                  value:
+                    id: 4ab96f75-6828-5673-c4gd-3d074g77bgb7
+                    module: trade-license
+                    ruleType: RATE_MATRIX
+                    component: STAFFING_FEE
+                    scope: ENTITY
+                    conditions:
+                      employeeCount:
+                        jsonPath: $.certificateDetail.employeeCount
+                        from: 10
+                        to: 24
+                    calculationType: FLAT
+                    value: 1200
+                    priority: 10
+                    roundOff: NEAREST_1
+                    isActive: true
+                    effectiveFrom: '2024-04-01'
+                    version: 1
+                    configVersion: 1
+                    auditDetail:
+                      createdBy: user-uuid-123
+                      createdTime: 1751260000000
+                      lastModifiedBy: user-uuid-123
+                      lastModifiedTime: 1751260000000
+        '400':
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                validation:
+                  value:
+                  - code: Validation.Error
+                    message: calculationType is FLAT but 'value' is missing.
+        '409':
+          description: Either `Rule.AlreadyExists` (an active rule already matches this component/conditions/date), or `AttributePath.Conflict` (an attribute or subEntityPath name is already registered for this module with a different JSONPath).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                pathConflict:
+                  summary: Attribute already mapped to a different path
+                  value:
+                  - code: AttributePath.Conflict
+                    message: '''employeeCount'' is already registered for module ''TradeLicense'' with jsonPath ''$.tradeLicenseDetail.employeeCount''. This rule declared ''$.tradeLicenseDetail.staffCount''. Use the registered path, or update all rules referencing this attribute together.'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                serverError:
+                  value:
+                  - code: Internal.ServerError
+                    message: An unexpected error occurred. Retry with the same Idempotency-Key.
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                unauthorized:
+                  value:
+                  - code: Unauthorized
+                    message: Missing or invalid bearer token.
+    get:
+      summary: Search calculation rules
+      operationId: searchCalculationRules
+      tags:
+      - Config
+      description: 'Returns calculation rules for the calling tenant, optionally filtered by module, component, ruleType, and an as-on date.
+
+        If `asOnDate` is provided, only the rule version effective on that date is returned per (module, component, conditions) combination.
+
+        '
+      parameters:
+      - $ref: '#/components/parameters/RequestIdHeader'
+      - $ref: '#/components/parameters/CorrelationIdHeader'
+      - $ref: '#/components/parameters/UserAgentHeader'
+      - $ref: '#/components/parameters/TenantIdHeader'
+      - $ref: '#/components/parameters/ForwardedForHeader'
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/ClientSecret'
+      - $ref: '#/components/parameters/TimeStamp'
+      - name: component
+        in: query
+        required: false
+        schema:
+          type: string
+        description: The component code to filter by, e.g. STAFFING_FEE, ACCESSORY_REGISTRATION_FEE, CGST, PENALTY.
+      - name: ruleType
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/RuleType'
+        description: Filter by rule category.
+      - name: asOnDate
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date
+        description: Return only the rule version effective on this date. Defaults to today if omitted.
+      - $ref: '#/components/parameters/ModulePath'
+      responses:
+        '200':
+          description: Calculation rules returned.
+          headers:
+            X-Response-Time:
+              $ref: '#/components/headers/X-Response-Time'
+            X-Response-Timestamp:
+              $ref: '#/components/headers/X-Response-Timestamp'
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-Correlation-ID:
+              $ref: '#/components/headers/X-Correlation-ID'
+            X-Tenant-ID:
+              $ref: '#/components/headers/X-Tenant-ID'
+            X-Rate-Limit:
+              $ref: '#/components/headers/X-Rate-Limit'
+            X-Rate-Limit-Remaining:
+              $ref: '#/components/headers/X-Rate-Limit-Remaining'
+            X-Rate-Limit-Reset:
+              $ref: '#/components/headers/X-Rate-Limit-Reset'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CalculationRule'
+              examples:
+                twoRules:
+                  summary: Two active rules for trade-license
+                  value:
+                  - id: 4ab96f75-6828-5673-c4gd-3d074g77bgb7
+                    module: trade-license
+                    ruleType: RATE_MATRIX
+                    component: STAFFING_FEE
+                    scope: ENTITY
+                    conditions:
+                      employeeCount:
+                        jsonPath: $.certificateDetail.employeeCount
+                        from: 10
+                        to: 24
+                    calculationType: FLAT
+                    value: 1200
+                    priority: 10
+                    roundOff: NEAREST_1
+                    isActive: true
+                    effectiveFrom: '2024-04-01'
+                    version: 1
+                    configVersion: 1
+                    auditDetail:
+                      createdBy: user-uuid-123
+                      createdTime: 1751260000000
+                      lastModifiedBy: user-uuid-123
+                      lastModifiedTime: 1751260000000
+                  - id: c3d4e5f6-3333-4444-5555-666677778888
+                    module: trade-license
+                    ruleType: TAX
+                    component: CGST
+                    scope: ENTITY
+                    conditions: {}
+                    calculationType: PERCENTAGE
+                    value: 9
+                    appliesOn:
+                      componentRef: STAFFING_FEE
+                    dependsOn:
+                    - STAFFING_FEE
+                    priority: 20
+                    roundOff: NEAREST_1
+                    isActive: true
+                    effectiveFrom: '2024-04-01'
+                    version: 1
+                    configVersion: 1
+                    auditDetail:
+                      createdBy: user-uuid-123
+                      createdTime: 1751260000000
+                      lastModifiedBy: user-uuid-123
+                      lastModifiedTime: 1751260000000
+        '400':
+          description: Bad Request.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                badRequest:
+                  value:
+                  - code: Validation.Error
+                    message: asOnDate must be a valid ISO date.
+        '404':
+          description: No rules found for the given filters.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                notFound:
+                  value:
+                  - code: Rule.NotFound
+                    message: No rules found for module 'trade-license' with the given filters.
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                serverError:
+                  value:
+                  - code: Internal.ServerError
+                    message: An unexpected error occurred.
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                unauthorized:
+                  value:
+                  - code: Unauthorized
+                    message: Missing or invalid bearer token.
+  /{module}/rules/{id}:
+    put:
+      summary: Update a calculation rule
+      operationId: updateCalculationRule
+      tags:
+      - Config
+      description: 'Updates an existing calculation rule identified by `id`, under the calling tenant.
+
+        Only include fields you want to change — omitted fields retain their current values.
+
+        `module`, `ruleType`, and `component` are immutable — delete and re-create the rule to change them.
+
+        The same attribute-path registration check described on POST runs on every update.
+
+        Returns `404` if no rule exists with the given `id`.
+
+        Set `breakingChange: true` to bump `configVersion` — use whenever `value`, `slabs`, `formulaLogic`, or `conditions` change in a way that would alter previously computed amounts.
+
+        On success, the rule cache for this tenant+module is immediately invalidated.
+
+        '
+      parameters:
+      - $ref: '#/components/parameters/RequestIdHeader'
+      - $ref: '#/components/parameters/CorrelationIdHeader'
+      - $ref: '#/components/parameters/UserAgentHeader'
+      - $ref: '#/components/parameters/TenantIdHeader'
+      - $ref: '#/components/parameters/ForwardedForHeader'
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/ClientSecret'
+      - $ref: '#/components/parameters/TimeStamp'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/ModulePath'
+      - $ref: '#/components/parameters/RuleIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CalculationRuleUpdateRequest'
+            example:
+              version: 1
+              breakingChange: true
+              value: 2.5
+              effectiveFrom: '2025-04-01'
+      responses:
+        '200':
+          description: Calculation rule updated.
+          headers:
+            X-Response-Time:
+              $ref: '#/components/headers/X-Response-Time'
+            X-Response-Timestamp:
+              $ref: '#/components/headers/X-Response-Timestamp'
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-Correlation-ID:
+              $ref: '#/components/headers/X-Correlation-ID'
+            X-Tenant-ID:
+              $ref: '#/components/headers/X-Tenant-ID'
+            X-Rate-Limit:
+              $ref: '#/components/headers/X-Rate-Limit'
+            X-Rate-Limit-Remaining:
+              $ref: '#/components/headers/X-Rate-Limit-Remaining'
+            X-Rate-Limit-Reset:
+              $ref: '#/components/headers/X-Rate-Limit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalculationRule'
+              examples:
+                updated:
+                  summary: STAFFING_FEE amount increased, breakingChange
+                  value:
+                    id: 4ab96f75-6828-5673-c4gd-3d074g77bgb7
+                    module: trade-license
+                    ruleType: RATE_MATRIX
+                    component: STAFFING_FEE
+                    scope: ENTITY
+                    conditions:
+                      employeeCount:
+                        jsonPath: $.certificateDetail.employeeCount
+                        from: 10
+                        to: 24
+                    calculationType: FLAT
+                    value: 1500
+                    priority: 10
+                    roundOff: NEAREST_1
+                    isActive: true
+                    effectiveFrom: '2024-04-01'
+                    version: 2
+                    configVersion: 2
+                    auditDetail:
+                      createdBy: user-uuid-123
+                      createdTime: 1751260000000
+                      lastModifiedBy: user-uuid-123
+                      lastModifiedTime: 1751260000000
+        '400':
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                validation:
+                  value:
+                  - code: Validation.Error
+                    message: value must be a positive number for calculationType FLAT.
+        '404':
+          description: No rule found with the given id.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                notFound:
+                  value:
+                  - code: Rule.NotFound
+                    message: No rule found with the given id.
+        '409':
+          description: Conflict — immutable field change attempted (module, ruleType, or component), a stale `version` was supplied, or an `AttributePath.Conflict` was detected.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                staleVersion:
+                  value:
+                  - code: Rule.VersionConflict
+                    message: Provided version 1 does not match current version 2. Fetch the latest and retry.
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                serverError:
+                  value:
+                  - code: Internal.ServerError
+                    message: An unexpected error occurred.
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                unauthorized:
+                  value:
+                  - code: Unauthorized
+                    message: Missing or invalid bearer token.
+    delete:
+      summary: Delete a calculation rule
+      operationId: deleteCalculationRule
+      tags:
+      - Config
+      description: 'Deletes the calculation rule identified by `id`, under the calling tenant.
+
+        Deleting a rule does not affect calculations already confirmed under it — confirmed calculations always reference the rule `configVersion` active at confirmation time.
+
+        Does NOT deregister the attribute path this rule contributed — the (module, attributeName) → jsonPath registry entry persists as long as any other active rule still references that name, and is only released once no rule references it.
+
+        Idempotent — returns `200` even if no rule existed with the given id.
+
+        '
+      parameters:
+      - $ref: '#/components/parameters/RequestIdHeader'
+      - $ref: '#/components/parameters/CorrelationIdHeader'
+      - $ref: '#/components/parameters/UserAgentHeader'
+      - $ref: '#/components/parameters/TenantIdHeader'
+      - $ref: '#/components/parameters/ForwardedForHeader'
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/ClientSecret'
+      - $ref: '#/components/parameters/TimeStamp'
+      - $ref: '#/components/parameters/ModulePath'
+      - $ref: '#/components/parameters/RuleIdPath'
+      responses:
+        '200':
+          description: Rule deleted or did not exist.
+          headers:
+            X-Response-Time:
+              $ref: '#/components/headers/X-Response-Time'
+            X-Response-Timestamp:
+              $ref: '#/components/headers/X-Response-Timestamp'
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-Correlation-ID:
+              $ref: '#/components/headers/X-Correlation-ID'
+            X-Tenant-ID:
+              $ref: '#/components/headers/X-Tenant-ID'
+            X-Rate-Limit:
+              $ref: '#/components/headers/X-Rate-Limit'
+            X-Rate-Limit-Remaining:
+              $ref: '#/components/headers/X-Rate-Limit-Remaining'
+            X-Rate-Limit-Reset:
+              $ref: '#/components/headers/X-Rate-Limit-Reset'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: boolean
+                    example: true
+              examples:
+                deleted:
+                  summary: Rule deleted
+                  value:
+                    deleted: true
+        '400':
+          description: Bad Request.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                badRequest:
+                  value:
+                  - code: Validation.Error
+                    message: id must be a valid UUID.
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                serverError:
+                  value:
+                  - code: Internal.ServerError
+                    message: An unexpected error occurred.
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                unauthorized:
+                  value:
+                  - code: Unauthorized
+                    message: Missing or invalid bearer token.
+  /{module}/rules/attribute-paths:
+    get:
+      summary: List registered attribute paths for a module
+      operationId: listAttributePaths
+      tags:
+      - Config
+      description: 'Returns the current (attributeName → jsonPath) registry for a module — every canonical attribute name any active rule has declared, and the single path it resolves to.
+
+        Useful for a config-authoring UI to warn against reusing a name with a different path before the write-time `409` would otherwise catch it, and to review what a module''s rules actually read from the raw payload.
+
+        '
+      parameters:
+      - $ref: '#/components/parameters/RequestIdHeader'
+      - $ref: '#/components/parameters/TenantIdHeader'
+      - $ref: '#/components/parameters/ModulePath'
+      responses:
+        '200':
+          description: Registered attribute paths.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributePathRegistry'
+              example:
+                module: TradeLicense
+                entries:
+                - attributeName: employeeCount
+                  jsonPath: $.tradeLicenseDetail.employeeCount
+                  scope: ENTITY
+                  source: RAW_PAYLOAD
+                  registeredByRuleId: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+                - attributeName: numberOfAccessories
+                  jsonPath: null
+                  scope: ENTITY
+                  source: DERIVED
+                  derivedFromComponent: TOTAL_ACCESSORY_COUNT
+                  registeredByRuleId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                - attributeName: accessories[*]
+                  jsonPath: $.tradeLicenseDetail.accessories[*]
+                  scope: SUBENTITY
+                  source: RAW_PAYLOAD
+                  registeredByRuleId: 4ab96f75-6828-5673-c4gd-3d074g77bgb7
+        '400':
+          description: Bad Request.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                badRequest:
+                  value:
+                  - code: Validation.Error
+                    message: module path segment is required.
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                unauthorized:
+                  value:
+                  - code: Unauthorized
+                    message: Missing or invalid bearer token.
+  /{module}/calculations:
+    get:
+      summary: Search calculation records for an entity
+      operationId: searchCalculationRecords
+      tags:
+      - Calculation
+      description: Returns every CalculationRecord (confirmed or cancelled) for a given entityId under this module — the history of demands/bills raised for one property, certificate, or connection. Draft (unconfirmed) estimates are not included; they are not persisted as records until /confirm. Use this to locate the current active record before calling an amend/supersede flow, or to reconcile against billing.
+      parameters:
+      - $ref: '#/components/parameters/RequestIdHeader'
+      - $ref: '#/components/parameters/CorrelationIdHeader'
+      - $ref: '#/components/parameters/UserAgentHeader'
+      - $ref: '#/components/parameters/TenantIdHeader'
+      - $ref: '#/components/parameters/ForwardedForHeader'
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/ClientSecret'
+      - $ref: '#/components/parameters/TimeStamp'
+      - $ref: '#/components/parameters/ModulePath'
+      - name: entityId
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+        description: The entity to return calculation records for.
+        example: b3a12c84-1234-4321-a9fc-2b983e55bca3
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - CONFIRMED
+          - CANCELLED
+        description: Filter by record status.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      responses:
+        '200':
+          description: Calculation records returned.
+          headers:
+            X-Response-Time:
+              $ref: '#/components/headers/X-Response-Time'
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-Tenant-ID:
+              $ref: '#/components/headers/X-Tenant-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalculationRecordListResponse'
+              examples:
+                oneRecord:
+                  summary: One confirmed record for this entity
+                  value:
+                    totalCount: 1
+                    page: 0
+                    size: 20
+                    calculationRecords:
+                    - calculationId: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+                      entityId: b3a12c84-1234-4321-a9fc-2b983e55bca3
+                      module: trade-license
+                      status: CONFIRMED
+                      entityDetailSnapshot:
+                        certificate:
+                          certificateTypeCode: trade-license
+                          certificateDetail:
+                            category: y
+                            employeeCount: 18
+                      lineItems:
+                      - component: STAFFING_FEE
+                        ruleType: RATE_MATRIX
+                        subEntityIndex: null
+                        ruleId: 4ab96f75-6828-5673-c4gd-3d074g77bgb7
+                        configVersion: 1
+                        resolvedJsonPath: $.certificateDetail.employeeCount
+                        amount: 1200
+                        description: employeeCount band 10-24 → flat 1200
+                      - component: CGST
+                        ruleType: TAX
+                        subEntityIndex: null
+                        ruleId: c3d4e5f6-3333-4444-5555-666677778888
+                        configVersion: 1
+                        resolvedJsonPath: null
+                        amount: 108
+                        description: 9% of STAFFING_FEE (1200)
+                      - component: SGST
+                        ruleType: TAX
+                        subEntityIndex: null
+                        ruleId: d4e5f6a7-4444-5555-6666-777788889999
+                        configVersion: 1
+                        resolvedJsonPath: null
+                        amount: 108
+                        description: 9% of STAFFING_FEE (1200)
+                      - component: FIRE_CESS
+                        ruleType: TAX
+                        subEntityIndex: null
+                        ruleId: e5f6a7b8-5555-6666-7777-888899990000
+                        configVersion: 1
+                        resolvedJsonPath: null
+                        amount: 12
+                        description: 1% of STAFFING_FEE (1200)
+                      - component: CANCER_CESS
+                        ruleType: TAX
+                        subEntityIndex: null
+                        ruleId: f6a7b8c9-6666-7777-8888-999900001111
+                        configVersion: 1
+                        resolvedJsonPath: null
+                        amount: 50
+                        description: flat cess
+                      totalAmount: 1478
+                      confirmedAt: '2026-07-03T10:20:00Z'
+                      auditDetail:
+                        createdBy: user-uuid-123
+                        createdTime: 1751260000000
+                        lastModifiedBy: user-uuid-123
+                        lastModifiedTime: 1751260000000
+        '400':
+          description: Bad Request.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                badRequest:
+                  value:
+                  - code: Validation.Error
+                    message: entityId query parameter is required.
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                unauthorized:
+                  value:
+                  - code: Unauthorized
+                    message: Missing or invalid bearer token.
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                serverError:
+                  value:
+                  - code: Internal.ServerError
+                    message: An unexpected error occurred.
+  /{module}/estimate:
+    post:
+      summary: Estimate tax/fee for a raw entity payload
+      operationId: estimateCalculation
+      tags:
+      - Calculation
+      description: 'Computes a full tax/fee breakup directly against `entityDetail` — the caller''s own domain JSON, in whatever shape it naturally exists. The engine does not require `entityDetail` to conform to any fixed schema; it only reads the specific JSONPaths that this module''s active rules declare.
+
+
+        Evaluation flow:
+
+        1. Run all `AGGREGATION` rules first — resolve each `subEntityPath`, apply `aggregateFunction` over `sourceAttribute`, and inject the result into the entity context under `targetAttribute`.
+
+        2. Run `RATE_MATRIX` rules — for `scope: SUBENTITY` rules, resolve `subEntityPath` and evaluate once per array element; for `scope: ENTITY` rules, evaluate once against the root payload plus any derived attributes from step 1.
+
+        3. Apply `ADJUSTMENT` rules in ascending `priority` order.
+
+        4. Evaluate remaining `PENALTY`, `INTEREST`, `TAX` components in `dependsOn` topological order, using `asOnDate` for time-based components.
+
+        5. Round each line item per its rule''s `roundOff`.
+
+
+        Returns a UUID `calculationId`. This is a stateless preview by default — nothing is persisted as a payable demand until `/confirm` is called.
+
+        '
+      parameters:
+      - $ref: '#/components/parameters/RequestIdHeader'
+      - $ref: '#/components/parameters/CorrelationIdHeader'
+      - $ref: '#/components/parameters/UserAgentHeader'
+      - $ref: '#/components/parameters/TenantIdHeader'
+      - $ref: '#/components/parameters/ForwardedForHeader'
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/ClientSecret'
+      - $ref: '#/components/parameters/TimeStamp'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/ModulePath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EstimateRequest'
+            examples:
+              tradeLicenseRawPayload:
+                summary: Caller's own Trade License JSON, sent as-is
+                value:
+                  entityId: b3a12c84-1234-4321-a9fc-2b983e55bca3
+                  asOnDate: '2026-07-03'
+                  entityDetail:
+                    tradeLicenseDetail:
+                      applicationNo: TL-2026-000123
+                      employeeCount: 18
+                      category: RESTAURANT
+                      premises:
+                        sizeSqm: 120
+                      accessories:
+                      - type: WEIGHING_SCALE
+                        quantity: 3
+                      - type: GENERATOR
+                        quantity: 1
+              propertyTaxRawPayload:
+                summary: Caller's own Property JSON with a nested units array
+                value:
+                  entityId: property-123
+                  asOnDate: '2026-07-03'
+                  entityDetail:
+                    property:
+                      propertyId: property-123
+                      zoneClass: A1
+                      ownerType: ARMY
+                      ageOfBuilding: 35
+                      units:
+                      - floorNo: 0
+                        usageType: SHOP
+                        area: 400
+                        occupancy: RENTED
+                      - floorNo: 1
+                        usageType: RESIDENTIAL
+                        area: 600
+                        occupancy: SELF
+      responses:
+        '200':
+          description: Estimate computed successfully.
+          headers:
+            X-Response-Time:
+              $ref: '#/components/headers/X-Response-Time'
+            X-Response-Timestamp:
+              $ref: '#/components/headers/X-Response-Timestamp'
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-Correlation-ID:
+              $ref: '#/components/headers/X-Correlation-ID'
+            X-Tenant-ID:
+              $ref: '#/components/headers/X-Tenant-ID'
+            X-Rate-Limit:
+              $ref: '#/components/headers/X-Rate-Limit'
+            X-Rate-Limit-Remaining:
+              $ref: '#/components/headers/X-Rate-Limit-Remaining'
+            X-Rate-Limit-Reset:
+              $ref: '#/components/headers/X-Rate-Limit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstimateResponse'
+              examples:
+                staffingFeeEstimate:
+                  summary: Trade license estimate — STAFFING_FEE + CGST/SGST/cess
+                  value:
+                    calculationId: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+                    entityId: b3a12c84-1234-4321-a9fc-2b983e55bca3
+                    module: trade-license
+                    status: DRAFT
+                    lineItems:
+                    - component: STAFFING_FEE
+                      ruleType: RATE_MATRIX
+                      subEntityIndex: null
+                      ruleId: 4ab96f75-6828-5673-c4gd-3d074g77bgb7
+                      configVersion: 1
+                      resolvedJsonPath: $.certificateDetail.employeeCount
+                      amount: 1200
+                      description: employeeCount band 10-24 → flat 1200
+                    - component: CGST
+                      ruleType: TAX
+                      subEntityIndex: null
+                      ruleId: c3d4e5f6-3333-4444-5555-666677778888
+                      configVersion: 1
+                      resolvedJsonPath: null
+                      amount: 108
+                      description: 9% of STAFFING_FEE (1200)
+                    - component: SGST
+                      ruleType: TAX
+                      subEntityIndex: null
+                      ruleId: d4e5f6a7-4444-5555-6666-777788889999
+                      configVersion: 1
+                      resolvedJsonPath: null
+                      amount: 108
+                      description: 9% of STAFFING_FEE (1200)
+                    - component: FIRE_CESS
+                      ruleType: TAX
+                      subEntityIndex: null
+                      ruleId: e5f6a7b8-5555-6666-7777-888899990000
+                      configVersion: 1
+                      resolvedJsonPath: null
+                      amount: 12
+                      description: 1% of STAFFING_FEE (1200)
+                    - component: CANCER_CESS
+                      ruleType: TAX
+                      subEntityIndex: null
+                      ruleId: f6a7b8c9-6666-7777-8888-999900001111
+                      configVersion: 1
+                      resolvedJsonPath: null
+                      amount: 50
+                      description: flat cess
+                    taxableAmount: 1200
+                    totalAmount: 1478
+                    generatedAt: '2026-07-03T10:15:30Z'
+        '400':
+          description: Bad Request — module disabled for this tenant, or `entityDetail` is not a JSON object.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                badRequest:
+                  value:
+                  - code: Validation.Error
+                    message: entityDetail must be a JSON object.
+        '401':
+          description: Unauthorized — missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                unauthorized:
+                  value:
+                  - code: Unauthorized
+                    message: Missing or invalid bearer token.
+        '422':
+          description: 'Unprocessable — one of: a rule''s `jsonPath`/`subEntityPath` did not resolve against the supplied `entityDetail` (`AttributePath.NotResolved`); no RATE_MATRIX rule matched a subEntity (`Rule.NoMatch`); or the module''s active rule set forms a cyclic dependency graph (`Rule.CyclicDependency`).'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                pathNotResolved:
+                  summary: Declared jsonPath absent from this payload
+                  value:
+                  - code: AttributePath.NotResolved
+                    message: Rule 'STAFFING_FEE' expects '$.tradeLicenseDetail.employeeCount' but this path was not found in the supplied entityDetail.
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                serverError:
+                  value:
+                  - code: Internal.ServerError
+                    message: An unexpected error occurred.
+  /{module}/recalculate:
+    post:
+      summary: Recalculate an existing estimate
+      operationId: recalculateCalculation
+      tags:
+      - Calculation
+      description: 'Recomputes a previously generated (but not yet confirmed) estimate — typically because time has passed and PENALTY/INTEREST need fresh values, or because the caller''s `entityDetail` changed.
+
+
+        `calculationId` is the UUID returned from `/estimate`.
+
+        If `entityDetail` is omitted, the previously submitted payload is reused and only `asOnDate` advances. If provided, it fully replaces the previous payload.
+
+
+        **Pre-conditions:** `calculationId` must refer to an existing, unconfirmed estimate.
+
+        '
+      parameters:
+      - $ref: '#/components/parameters/RequestIdHeader'
+      - $ref: '#/components/parameters/CorrelationIdHeader'
+      - $ref: '#/components/parameters/UserAgentHeader'
+      - $ref: '#/components/parameters/TenantIdHeader'
+      - $ref: '#/components/parameters/ForwardedForHeader'
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/ClientSecret'
+      - $ref: '#/components/parameters/TimeStamp'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/ModulePath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecalculateRequest'
+            example:
+              calculationId: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+              asOnDate: '2026-08-15'
+      responses:
+        '200':
+          description: Estimate recalculated successfully.
+          headers:
+            X-Response-Time:
+              $ref: '#/components/headers/X-Response-Time'
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-Tenant-ID:
+              $ref: '#/components/headers/X-Tenant-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstimateResponse'
+              examples:
+                recalculated:
+                  summary: Same draft, recalculated at a later asOnDate
+                  value:
+                    calculationId: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+                    entityId: b3a12c84-1234-4321-a9fc-2b983e55bca3
+                    module: trade-license
+                    status: DRAFT
+                    lineItems:
+                    - component: STAFFING_FEE
+                      ruleType: RATE_MATRIX
+                      subEntityIndex: null
+                      ruleId: 4ab96f75-6828-5673-c4gd-3d074g77bgb7
+                      configVersion: 1
+                      resolvedJsonPath: $.certificateDetail.employeeCount
+                      amount: 1200
+                      description: employeeCount band 10-24 → flat 1200
+                    - component: CGST
+                      ruleType: TAX
+                      subEntityIndex: null
+                      ruleId: c3d4e5f6-3333-4444-5555-666677778888
+                      configVersion: 1
+                      resolvedJsonPath: null
+                      amount: 108
+                      description: 9% of STAFFING_FEE (1200)
+                    - component: SGST
+                      ruleType: TAX
+                      subEntityIndex: null
+                      ruleId: d4e5f6a7-4444-5555-6666-777788889999
+                      configVersion: 1
+                      resolvedJsonPath: null
+                      amount: 108
+                      description: 9% of STAFFING_FEE (1200)
+                    - component: FIRE_CESS
+                      ruleType: TAX
+                      subEntityIndex: null
+                      ruleId: e5f6a7b8-5555-6666-7777-888899990000
+                      configVersion: 1
+                      resolvedJsonPath: null
+                      amount: 12
+                      description: 1% of STAFFING_FEE (1200)
+                    - component: CANCER_CESS
+                      ruleType: TAX
+                      subEntityIndex: null
+                      ruleId: f6a7b8c9-6666-7777-8888-999900001111
+                      configVersion: 1
+                      resolvedJsonPath: null
+                      amount: 50
+                      description: flat cess
+                    taxableAmount: 1200
+                    totalAmount: 1478
+                    generatedAt: '2026-08-15T09:00:00Z'
+        '400':
+          description: Bad Request — missing or malformed fields. Also returned as `Module.Mismatch` when the `module` in the path does not match the module the referenced `calculationId` was originally created under.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                moduleMismatch:
+                  summary: Path module does not match the calculation’s module
+                  value:
+                  - code: Module.Mismatch
+                    message: calculationId '8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3' was created under module 'trade-license', not the module in this request path.
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                unauthorized:
+                  value:
+                  - code: Unauthorized
+                    message: Missing or invalid bearer token.
+        '404':
+          description: Not Found — calculationId does not exist.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                notFound:
+                  value:
+                  - code: Calculation.NotFound
+                    message: No calculation found with the given calculationId.
+        '409':
+          description: Conflict — the calculation has already been confirmed and is immutable.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                alreadyConfirmed:
+                  value:
+                  - code: Calculation.AlreadyConfirmed
+                    message: This calculation has already been confirmed and is immutable. Use the amend flow instead of recalculate.
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                serverError:
+                  value:
+                  - code: Internal.ServerError
+                    message: An unexpected error occurred.
+  /{module}/confirm:
+    post:
+      summary: Confirm an estimate into a payable demand
+      operationId: confirmCalculation
+      tags:
+      - Calculation
+      description: 'Freezes a previously generated estimate into an immutable `CalculationRecord`, locking in the exact `configVersion` and resolved `jsonPath` of every rule/attribute used.
+
+
+        `calculationId` is the UUID returned from `/estimate` or `/recalculate`.
+
+
+        **Idempotent by `Idempotency-Key`:** replaying the same key returns the original `CalculationRecord` (HTTP 200) instead of creating a duplicate.
+
+        '
+      parameters:
+      - $ref: '#/components/parameters/RequestIdHeader'
+      - $ref: '#/components/parameters/CorrelationIdHeader'
+      - $ref: '#/components/parameters/UserAgentHeader'
+      - $ref: '#/components/parameters/TenantIdHeader'
+      - $ref: '#/components/parameters/ForwardedForHeader'
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/ClientSecret'
+      - $ref: '#/components/parameters/TimeStamp'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/ModulePath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmRequest'
+            example:
+              calculationId: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+      responses:
+        '201':
+          description: CalculationRecord created.
+          headers:
+            X-Response-Time:
+              $ref: '#/components/headers/X-Response-Time'
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-Tenant-ID:
+              $ref: '#/components/headers/X-Tenant-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalculationRecordResponse'
+              examples:
+                confirmed:
+                  summary: CalculationRecord created
+                  value:
+                    calculationRecord:
+                      calculationId: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+                      entityId: b3a12c84-1234-4321-a9fc-2b983e55bca3
+                      module: trade-license
+                      status: CONFIRMED
+                      entityDetailSnapshot:
+                        certificate:
+                          certificateTypeCode: trade-license
+                          certificateDetail:
+                            category: y
+                            employeeCount: 18
+                      lineItems:
+                      - component: STAFFING_FEE
+                        ruleType: RATE_MATRIX
+                        subEntityIndex: null
+                        ruleId: 4ab96f75-6828-5673-c4gd-3d074g77bgb7
+                        configVersion: 1
+                        resolvedJsonPath: $.certificateDetail.employeeCount
+                        amount: 1200
+                        description: employeeCount band 10-24 → flat 1200
+                      - component: CGST
+                        ruleType: TAX
+                        subEntityIndex: null
+                        ruleId: c3d4e5f6-3333-4444-5555-666677778888
+                        configVersion: 1
+                        resolvedJsonPath: null
+                        amount: 108
+                        description: 9% of STAFFING_FEE (1200)
+                      - component: SGST
+                        ruleType: TAX
+                        subEntityIndex: null
+                        ruleId: d4e5f6a7-4444-5555-6666-777788889999
+                        configVersion: 1
+                        resolvedJsonPath: null
+                        amount: 108
+                        description: 9% of STAFFING_FEE (1200)
+                      - component: FIRE_CESS
+                        ruleType: TAX
+                        subEntityIndex: null
+                        ruleId: e5f6a7b8-5555-6666-7777-888899990000
+                        configVersion: 1
+                        resolvedJsonPath: null
+                        amount: 12
+                        description: 1% of STAFFING_FEE (1200)
+                      - component: CANCER_CESS
+                        ruleType: TAX
+                        subEntityIndex: null
+                        ruleId: f6a7b8c9-6666-7777-8888-999900001111
+                        configVersion: 1
+                        resolvedJsonPath: null
+                        amount: 50
+                        description: flat cess
+                      totalAmount: 1478
+                      confirmedAt: '2026-07-03T10:20:00Z'
+                      auditDetail:
+                        createdBy: user-uuid-123
+                        createdTime: 1751260000000
+                        lastModifiedBy: user-uuid-123
+                        lastModifiedTime: 1751260000000
+        '200':
+          description: Existing CalculationRecord returned (idempotent replay).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalculationRecordResponse'
+              examples:
+                idempotentReplay:
+                  summary: Replayed via Idempotency-Key, same record returned
+                  value:
+                    calculationRecord:
+                      calculationId: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+                      entityId: b3a12c84-1234-4321-a9fc-2b983e55bca3
+                      module: trade-license
+                      status: CONFIRMED
+                      entityDetailSnapshot:
+                        certificate:
+                          certificateTypeCode: trade-license
+                          certificateDetail:
+                            category: y
+                            employeeCount: 18
+                      lineItems:
+                      - component: STAFFING_FEE
+                        ruleType: RATE_MATRIX
+                        subEntityIndex: null
+                        ruleId: 4ab96f75-6828-5673-c4gd-3d074g77bgb7
+                        configVersion: 1
+                        resolvedJsonPath: $.certificateDetail.employeeCount
+                        amount: 1200
+                        description: employeeCount band 10-24 → flat 1200
+                      - component: CGST
+                        ruleType: TAX
+                        subEntityIndex: null
+                        ruleId: c3d4e5f6-3333-4444-5555-666677778888
+                        configVersion: 1
+                        resolvedJsonPath: null
+                        amount: 108
+                        description: 9% of STAFFING_FEE (1200)
+                      - component: SGST
+                        ruleType: TAX
+                        subEntityIndex: null
+                        ruleId: d4e5f6a7-4444-5555-6666-777788889999
+                        configVersion: 1
+                        resolvedJsonPath: null
+                        amount: 108
+                        description: 9% of STAFFING_FEE (1200)
+                      - component: FIRE_CESS
+                        ruleType: TAX
+                        subEntityIndex: null
+                        ruleId: e5f6a7b8-5555-6666-7777-888899990000
+                        configVersion: 1
+                        resolvedJsonPath: null
+                        amount: 12
+                        description: 1% of STAFFING_FEE (1200)
+                      - component: CANCER_CESS
+                        ruleType: TAX
+                        subEntityIndex: null
+                        ruleId: f6a7b8c9-6666-7777-8888-999900001111
+                        configVersion: 1
+                        resolvedJsonPath: null
+                        amount: 50
+                        description: flat cess
+                      totalAmount: 1478
+                      confirmedAt: '2026-07-03T10:20:00Z'
+                      auditDetail:
+                        createdBy: user-uuid-123
+                        createdTime: 1751260000000
+                        lastModifiedBy: user-uuid-123
+                        lastModifiedTime: 1751260000000
+        '400':
+          description: Bad Request — missing or malformed fields. Also returned as `Module.Mismatch` when the `module` in the path does not match the module the referenced `calculationId` was originally created under.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                moduleMismatch:
+                  summary: Path module does not match the calculation’s module
+                  value:
+                  - code: Module.Mismatch
+                    message: calculationId '8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3' was created under module 'trade-license', not the module in this request path.
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                unauthorized:
+                  value:
+                  - code: Unauthorized
+                    message: Missing or invalid bearer token.
+        '404':
+          description: Not Found — calculationId does not exist.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                notFound:
+                  value:
+                  - code: Calculation.NotFound
+                    message: No calculation found with the given calculationId.
+        '409':
+          description: Conflict — calculation has already been confirmed or cancelled.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                alreadyCancelled:
+                  value:
+                  - code: Calculation.AlreadyCancelled
+                    message: This calculation has already been cancelled.
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                serverError:
+                  value:
+                  - code: Internal.ServerError
+                    message: An unexpected error occurred.
+  /{module}/cancel:
+    post:
+      summary: Cancel a calculation
+      operationId: cancelCalculation
+      tags:
+      - Calculation
+      description: 'Marks a calculation — confirmed or unconfirmed — as cancelled/void.
+
+
+        **Idempotent** — returns `200` even if the calculation was already cancelled.
+
+        '
+      parameters:
+      - $ref: '#/components/parameters/RequestIdHeader'
+      - $ref: '#/components/parameters/CorrelationIdHeader'
+      - $ref: '#/components/parameters/UserAgentHeader'
+      - $ref: '#/components/parameters/TenantIdHeader'
+      - $ref: '#/components/parameters/ForwardedForHeader'
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/ClientSecret'
+      - $ref: '#/components/parameters/TimeStamp'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/ModulePath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelRequest'
+            example:
+              calculationId: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+              reason: Duplicate demand raised in error
+      responses:
+        '200':
+          description: Calculation cancelled or was already inactive.
+          headers:
+            X-Response-Time:
+              $ref: '#/components/headers/X-Response-Time'
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-Tenant-ID:
+              $ref: '#/components/headers/X-Tenant-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelResponse'
+              examples:
+                cancelled:
+                  summary: Calculation cancelled
+                  value:
+                    cancelled: true
+                    calculationId: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+        '400':
+          description: Bad Request — missing or malformed fields. Also returned as `Module.Mismatch` when the `module` in the path does not match the module the referenced `calculationId` was originally created under.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                moduleMismatch:
+                  summary: Path module does not match the calculation’s module
+                  value:
+                  - code: Module.Mismatch
+                    message: calculationId '8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3' was created under module 'trade-license', not the module in this request path.
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                unauthorized:
+                  value:
+                  - code: Unauthorized
+                    message: Missing or invalid bearer token.
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Error'
+              examples:
+                serverError:
+                  value:
+                  - code: Internal.ServerError
+                    message: An unexpected error occurred.
+components:
+  securitySchemes:
+    BearerAuth:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/securitySchemes/BearerAuth
+  parameters:
+    RequestIdHeader:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/parameters/RequestIdHeader
+    CorrelationIdHeader:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/parameters/CorrelationIdHeader
+    UserAgentHeader:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/parameters/UserAgentHeader
+    TenantIdHeader:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/parameters/TenantIdHeader
+    ForwardedForHeader:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/parameters/ForwardedForHeader
+    ClientId:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/parameters/ClientId
+    ClientSecret:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/parameters/ClientSecret
+    TimeStamp:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/parameters/TimeStamp
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: 'Provide a unique value to prevent duplicate operations on retries.
+
+        For `/estimate` and `/confirm`: replaying the same key returns the original response instead of creating a duplicate calculation/record.
+
+        '
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+    ModulePath:
+      name: module
+      in: path
+      required: true
+      description: The government module this request applies to, e.g. trade-license, driving-license, property-tax. Free-form (not an enum) so new modules can be onboarded without a spec change. For calculation lifecycle endpoints (estimate/recalculate/confirm/cancel), this must match the module the calculationId was originally created under, or the request is rejected with 400 Module.Mismatch.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+    RuleIdPath:
+      name: id
+      in: path
+      required: true
+      description: The unique identifier of the calculation rule.
+      schema:
+        type: string
+        format: uuid
+  headers:
+    X-Response-Time:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/headers/X-Response-Time
+    X-Response-Timestamp:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/headers/X-Response-Timestamp
+    X-Request-ID:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/headers/X-Request-ID
+    X-Correlation-ID:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/headers/X-Correlation-ID
+    X-Tenant-ID:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/headers/X-Tenant-ID
+    X-Rate-Limit:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/headers/X-Rate-Limit
+    X-Rate-Limit-Remaining:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/headers/X-Rate-Limit-Remaining
+    X-Rate-Limit-Reset:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/headers/X-Rate-Limit-Reset
+  schemas:
+    Error:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/schemas/Error
+    AuditDetail:
+      $ref: https://raw.githubusercontent.com/digitnxt/digit-specs/refs/heads/main/v3.0.0/common.yaml#/components/schemas/AuditDetail
+    RuleType:
+      type: string
+      enum:
+      - RATE_MATRIX
+      - ADJUSTMENT
+      - PENALTY
+      - INTEREST
+      - TAX
+      - AGGREGATION
+      description: 'The category of calculation rule.
+
+        - **RATE_MATRIX**: Multi-dimensional base rate/slab lookup (e.g. ₹/sqft by zone+floor+size+usage, ₹/unit by accessory type).
+
+        - **ADJUSTMENT**: Rebate or exemption applied on top of a base component (owner-type rebate, age depreciation, bulk-accessory surcharge). Combinable — more than one may apply to the same entity.
+
+        - **PENALTY**: Time-based punitive component, typically dependent on days delayed past a due date.
+
+        - **INTEREST**: Time-based accrual component, typically dependent on principal and days delayed.
+
+        - **TAX**: Statutory tax head applied on a taxable base, e.g. CGST, SGST.
+
+        - **AGGREGATION**: Derives a single entity-level attribute by summing/counting/etc. over a sub-entity array (e.g. total accessory count from individual accessory line quantities), making it available to other rules as if it had been sent directly.
+
+        '
+    CalculationType:
+      type: string
+      enum:
+      - FLAT
+      - PERCENTAGE
+      - PER_UNIT
+      - SLAB
+      - FORMULA
+      description: 'How the rule''s `value` (or `slabs`/`formulaLogic`) is applied.
+
+        - **FLAT**: A fixed amount, added or subtracted as-is.
+
+        - **PERCENTAGE**: `value` is a percentage (e.g. `9` = 9%) of the component referenced by `appliesOn.componentRef`.
+
+        - **PER_UNIT**: `value` is a per-unit rate multiplied by the numeric field referenced by `appliesOn.jsonPath`.
+
+        - **SLAB**: `slabs` defines tiered from/to bands applied against the numeric field referenced by `appliesOn.jsonPath`.
+
+        - **FORMULA**: `formulaLogic` (JSON Logic) is evaluated against the variables declared in `formulaVariables`, plus any component amounts listed in `dependsOn`.
+
+        '
+    Scope:
+      type: string
+      enum:
+      - ENTITY
+      - SUBENTITY
+      description: 'Whether this rule evaluates once against the whole entity payload (`ENTITY`), or once per element of a repeating sub-entity array (`SUBENTITY`, requires `subEntityPath`).
+
+        '
+    AttributeCondition:
+      type: object
+      required:
+      - jsonPath
+      description: 'A single matching condition, resolved directly against the caller''s raw payload via `jsonPath` — either an exact match or a numeric/date range.
+
+        For `scope: SUBENTITY` rules, `jsonPath` is evaluated relative to each sub-entity element (e.g. `type`), not the document root.
+
+        If this attribute name is already registered for the module with a different `jsonPath`, the rule is rejected with `409 AttributePath.Conflict` — see the registration rule on `CalculationRule`.
+
+        '
+      properties:
+        jsonPath:
+          type: string
+          description: JSONPath to this attribute''s value. Root-relative for ENTITY scope (e.g. `$.tradeLicenseDetail.employeeCount`); relative to the current sub-entity element for SUBENTITY scope (e.g. `type`).
+          example: $.tradeLicenseDetail.employeeCount
+        derivedFrom:
+          type: string
+          nullable: true
+          description: Set instead of expecting a raw payload value — names the AGGREGATION (or other) component code that produced this attribute. When set, jsonPath is not resolved against the raw payload; the value is read from the already-computed derived attribute.
+          example: TOTAL_ACCESSORY_COUNT
+        equals:
+          description: Exact value this attribute must equal for the condition to match. Mutually exclusive with from/to.
+          example: WEIGHING_SCALE
+        from:
+          type: number
+          description: Inclusive lower bound of a range match.
+          example: 10
+        to:
+          type: number
+          nullable: true
+          description: Inclusive upper bound of a range match. Omit or null for unbounded-above.
+          example: 24
+      x-businessRules:
+      - Set jsonPath together with either equals, or from/to, or neither (a rule that only needs the attribute to be present). Setting both equals and from/to on the same condition is rejected — a condition is either an exact match or a range match, never both.
+      - derivedFrom, when set, replaces jsonPath resolution entirely — the value is read from an already-computed AGGREGATION result rather than the raw payload, and jsonPath is ignored.
+    AttributeBinding:
+      type: object
+      required:
+      - jsonPath
+      properties:
+        jsonPath:
+          type: string
+          description: JSONPath to the value bound to this variable name, for use in `formulaLogic`, `appliesOn` (PER_UNIT/SLAB), or `subEntityPath` iteration.
+          example: $.tradeLicenseDetail.premises.sizeSqm
+        componentRef:
+          type: string
+          nullable: true
+          description: Set instead of jsonPath when this binding refers to another component's already-computed amount rather than a raw payload field (used by PERCENTAGE calculationType and by ADJUSTMENT `appliesOn`).
+          example: LICENSE_FEE
+      description: Points a variable name or a rule input at a source of truth for its value — either a jsonPath into the raw entityDetail payload, or a componentRef pointing at another component's already-computed amount. Used by formulaVariables, appliesOn, and sourceAttribute wherever a rule needs to say where a number comes from.
+      x-businessRules:
+      - Exactly one of jsonPath or componentRef should be set on a given binding — jsonPath reads the raw payload, componentRef reads another component's computed amount. Setting neither is a validation error at rule-write time.
+    Slab:
+      type: object
+      required:
+      - from
+      - rate
+      properties:
+        from:
+          type: number
+          description: Inclusive lower bound of this tier.
+          example: 0
+        to:
+          type: number
+          nullable: true
+          description: Inclusive upper bound of this tier. Omit or null for the final, unbounded tier.
+          example: 500000
+        rate:
+          type: number
+          description: Rate applied to the portion of the value within this tier.
+          example: 0.5
+      description: One tier of a SLAB calculationType rule. from/to define the inclusive band this tier covers over the numeric value at appliesOn.jsonPath; rate is the multiplier applied only to the portion of the value that falls inside this tier — not the whole value.
+      x-businessRules:
+      - to may be omitted only on the final, highest tier in a rule's slabs array — every other tier must have both from and to.
+      - 'Tiers are true slabs, not brackets: a value of 700000 against tiers [0-500000 @ rate 0.5][500000+ @ rate 1] pays rate 0.5 on the first 500000 and rate 1 on the remaining 200000 — not rate 1 applied to the full 700000.'
+    CalculationRule:
+      type: object
+      description: 'A single configurable calculation rule for a module + component under a tenant. Every attribute this rule reads is declared inline via `jsonPath` — there is no separate entity-mapping resource.
+
+        '
+      required:
+      - ruleType
+      - component
+      - scope
+      - calculationType
+      - effectiveFrom
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+          description: System-generated unique identifier (UUID) for this rule record.
+          example: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+        module:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: The government module this rule belongs to, e.g. trade-license, driving-license, property-tax. Resolved from the {module} path segment on write; always present on read. Free-form (not an enum) so new modules can be onboarded without a spec change.
+          example: trade-license
+          readOnly: true
+        ruleType:
+          $ref: '#/components/schemas/RuleType'
+        component:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: The line-item code this rule produces or adjusts, e.g. STAFFING_FEE, ACCESSORY_REGISTRATION_FEE, CGST, PENALTY, BULK_ACCESSORY_SURCHARGE. Referenced by other rules' `dependsOn` and `appliesOn.componentRef` to build the evaluation graph.
+          example: STAFFING_FEE
+        scope:
+          $ref: '#/components/schemas/Scope'
+        subEntityPath:
+          type: string
+          nullable: true
+          description: 'Required when `scope = SUBENTITY`. JSONPath to the repeating array this rule iterates, e.g. `$.tradeLicenseDetail.accessories[*]`.
+
+            Any other rule sharing this `component` must resolve to the same path — enforced by the same registration-conflict check as attribute names.
+
+            '
+          example: $.tradeLicenseDetail.accessories[*]
+        conditions:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/AttributeCondition'
+          description: Attribute-name to AttributeCondition map this rule matches against. An empty object matches every entity/subEntity for this module.
+          example:
+            accessoryType:
+              jsonPath: type
+              equals: WEIGHING_SCALE
+        calculationType:
+          $ref: '#/components/schemas/CalculationType'
+        value:
+          type: number
+          description: Numeric rate/amount for FLAT, PERCENTAGE, and PER_UNIT. Percentage expressed in points (`9` = 9%). Negative for FLAT deductions (rebates).
+          example: 200
+        slabs:
+          type: array
+          items:
+            $ref: '#/components/schemas/Slab'
+          description: Ordered, non-overlapping tiers, required when calculationType = SLAB.
+          example:
+          - from: 0
+            to: 500000
+            rate: 0.5
+          - from: 500000
+            to: null
+            rate: 1
+        formulaLogic:
+          type: object
+          additionalProperties: true
+          description: 'JSON Logic (https://jsonlogic.com) expression, required when calculationType = FORMULA. References variable names declared in `formulaVariables` via a var operator, e.g. {"var": "name"}.'
+          example:
+            +:
+            - 200
+            - '*':
+              - var: sizeOfPremiseSqm
+              - 15
+        formulaVariables:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/AttributeBinding'
+          description: Declares, per variable name used in `formulaLogic`, where its value comes from. Required when calculationType = FORMULA.
+        appliesOn:
+          $ref: '#/components/schemas/AttributeBinding'
+          description: For PER_UNIT/SLAB, the numeric field (via jsonPath) the rate multiplies. For PERCENTAGE/ADJUSTMENT, the component (via componentRef) being taxed or adjusted.
+        aggregateFunction:
+          type: string
+          enum:
+          - SUM
+          - COUNT
+          - MAX
+          - MIN
+          - AVG
+          nullable: true
+          description: Required when ruleType = AGGREGATION. Function applied over `sourceAttribute` across every element resolved by `subEntityPath`.
+          example: SUM
+        sourceAttribute:
+          $ref: '#/components/schemas/AttributeBinding'
+          description: Required when ruleType = AGGREGATION. The per-sub-entity field (relative jsonPath) being aggregated, e.g. `quantity`.
+        targetAttribute:
+          type: string
+          nullable: true
+          description: Required when ruleType = AGGREGATION. The canonical attribute name the aggregated result is injected as, e.g. `numberOfAccessories` — becomes referenceable by other rules via `AttributeCondition.derivedFrom`.
+          example: numberOfAccessories
+        dependsOn:
+          type: array
+          items:
+            type: string
+          description: Component codes that must be evaluated before this one (topological ordering), e.g. an ADJUSTMENT that reads a derived attribute lists the AGGREGATION component that produces it.
+          example:
+          - TOTAL_ACCESSORY_COUNT
+        priority:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 100
+          description: Evaluation order hint within the same dependency tier, and the order multiple matching ADJUSTMENT rules apply. Lower values evaluate first.
+          example: 10
+        roundOff:
+          type: string
+          enum:
+          - NONE
+          - NEAREST_1
+          - NEAREST_10
+          - NEAREST_100
+          default: NEAREST_1
+          description: Rounding applied to this component's computed amount before it is added to the total.
+          example: NEAREST_1
+        isActive:
+          type: boolean
+          default: true
+          description: Whether this rule is active. Inactive rules are excluded from `/estimate` matching but retained for audit/history.
+          example: true
+        effectiveFrom:
+          type: string
+          format: date
+          description: Date from which this rule version is applicable (inclusive).
+          example: '2024-04-01'
+        effectiveTo:
+          type: string
+          format: date
+          nullable: true
+          description: Date until which this rule version is applicable (inclusive). Null means open-ended / currently active.
+          example: '2025-03-31'
+        version:
+          type: integer
+          format: int32
+          minimum: 1
+          readOnly: true
+          description: Server-managed counter incremented on every PUT. Used for optimistic concurrency.
+          example: 1
+        configVersion:
+          type: integer
+          format: int32
+          minimum: 1
+          readOnly: true
+          description: Server-managed counter incremented only when an update sets breakingChange to true. Snapshotted on every CalculationRecord so confirmed calculations remain reconstructable after later rule edits.
+          example: 1
+        auditDetail:
+          $ref: '#/components/schemas/AuditDetail'
+      x-businessRules:
+      - module, ruleType, component, and scope are immutable after creation — delete and re-create the rule to change any of them.
+      - 'Attribute-path registration: the first active rule (in any module) to reference a given attribute name registers its `jsonPath` for (module, attributeName). Any later rule using the same name with a different `jsonPath` is rejected with `409 AttributePath.Conflict`. This applies to `conditions` keys, `formulaVariables` keys, `sourceAttribute`, `appliesOn`, and to `subEntityPath` grouped by shared `component`.'
+      - subEntityPath is required and must be a JSONPath ending in an array/wildcard segment when scope = SUBENTITY; must be absent when scope = ENTITY.
+      - value is required and non-null when calculationType is FLAT, PERCENTAGE, or PER_UNIT.
+      - appliesOn.jsonPath is required when calculationType is PER_UNIT or SLAB; appliesOn.componentRef is required when calculationType is PERCENTAGE or ruleType is ADJUSTMENT.
+      - slabs must contain at least one tier, sorted and non-overlapping, when calculationType = SLAB.
+      - 'formulaLogic and formulaVariables are both required when calculationType = FORMULA; every var reference (e.g. {"var": "x"}) in formulaLogic must have a matching key in formulaVariables.'
+      - aggregateFunction, sourceAttribute, and targetAttribute are all required, and scope must be SUBENTITY, when ruleType = AGGREGATION.
+      - dependsOn must not introduce a cycle across all active rules for a module — the resulting component graph must be a DAG.
+      - effectiveFrom must be strictly before effectiveTo when effectiveTo is provided; no two active rules for the same (tenantId, module, component) may have overlapping conditions and overlapping effective date ranges.
+      - When multiple RATE_MATRIX rules could match the same context, the engine selects the most specific match — the rule with the fewest wildcarded condition keys wins.
+      - ADJUSTMENT rules are cumulative and applied in ascending priority order; RATE_MATRIX rules are expected to be mutually exclusive per entity/sub-entity.
+      - AGGREGATION rules are always evaluated before any rule that lists their `component` in `dependsOn`, regardless of `priority`.
+    CalculationRuleUpdateRequest:
+      allOf:
+      - $ref: '#/components/schemas/CalculationRule'
+      - type: object
+        required:
+        - version
+        properties:
+          version:
+            type: integer
+            description: Current version for optimistic concurrency check. Update is rejected with 409 if this does not match the stored version.
+          breakingChange:
+            type: boolean
+            default: false
+            description: Set true when this update changes computed amounts (value, slabs, formulaLogic, conditions) so that `configVersion` is bumped. Leave false for cosmetic edits.
+      description: Partial update payload for PUT on a single calculation rule. Include only the fields you want to change — omitted fields keep their current stored values. module, ruleType, component, and scope cannot be changed via this payload; delete and re-create the rule if any of those need to change.
+      x-businessRules:
+      - version must match the rule's current stored version exactly, or the update is rejected with 409 (stale version — someone else edited this rule since you read it).
+      - breakingChange defaults to false; set it to true whenever value, slabs, formulaLogic, or conditions change in a way that would alter previously computed amounts, so configVersion increments and existing CalculationRecords remain traceable to the exact rule version that produced them.
+    AttributePathRegistryEntry:
+      type: object
+      properties:
+        attributeName:
+          type: string
+          example: employeeCount
+          description: The canonical name rules reference in their conditions and formulaVariables keys — not necessarily the raw payload's own field name, just whatever name the first rule that used it chose to call it.
+        jsonPath:
+          type: string
+          nullable: true
+          description: Null when source = DERIVED (value comes from an AGGREGATION component rather than the raw payload).
+          example: $.tradeLicenseDetail.employeeCount
+        scope:
+          $ref: '#/components/schemas/Scope'
+        source:
+          type: string
+          enum:
+          - RAW_PAYLOAD
+          - DERIVED
+          description: RAW_PAYLOAD if resolved via jsonPath against entityDetail; DERIVED if produced by an AGGREGATION rule.
+          example: RAW_PAYLOAD
+        derivedFromComponent:
+          type: string
+          nullable: true
+          description: Set when source = DERIVED — the AGGREGATION component that produces this attribute.
+          example: TOTAL_ACCESSORY_COUNT
+        registeredByRuleId:
+          type: string
+          format: uuid
+          description: The rule that first registered this name/path pair.
+          example: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+      description: One entry in the (attributeName → jsonPath) registry for a module — shows where a canonical attribute name currently resolves, and whether it comes straight from the raw payload or is derived by an AGGREGATION rule.
+      x-businessRules:
+      - jsonPath is null when source = DERIVED — in that case derivedFromComponent names the AGGREGATION rule that produces the value instead.
+    AttributePathRegistry:
+      type: object
+      properties:
+        module:
+          type: string
+          description: The module this registry belongs to.
+          example: trade-license
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttributePathRegistryEntry'
+          description: Every attribute name any active rule has registered for this module so far.
+          example:
+          - attributeName: employeeCount
+            jsonPath: $.certificateDetail.employeeCount
+            scope: ENTITY
+            source: RAW_PAYLOAD
+            registeredByRuleId: 4ab96f75-6828-5673-c4gd-3d074g77bgb7
+      description: Response wrapper for the attribute-path registry lookup — the full (attributeName → jsonPath) mapping currently active for one module, built lazily from whichever rules have been written so far.
+      x-businessRules:
+      - This registry is read-only and derived — there is no direct write endpoint for it. Entries appear the moment the first active rule for this module references that attribute name, and disappear once no active rule references it anymore.
+    LineItem:
+      type: object
+      description: A single computed component of the breakup, corresponding to one matched or evaluated CalculationRule.
+      properties:
+        component:
+          type: string
+          example: ACCESSORY_REGISTRATION_FEE
+          description: The component code this line item represents — matches the component of the CalculationRule that produced it.
+        ruleType:
+          $ref: '#/components/schemas/RuleType'
+        subEntityIndex:
+          type: integer
+          nullable: true
+          description: Zero-based index into the array resolved by subEntityPath, or null for ENTITY-scope line items.
+          example: 0
+        ruleId:
+          type: string
+          format: uuid
+          description: The id of the CalculationRule that produced this line item.
+          example: 4ab96f75-6828-5673-c4gd-3d074g77bgb7
+        configVersion:
+          type: integer
+          description: The configVersion of the rule used, for audit traceability.
+          example: 1
+        resolvedJsonPath:
+          type: string
+          nullable: true
+          description: The exact JSONPath (with sub-entity index substituted, if applicable) resolved against entityDetail to produce this amount. Persisted for audit — lets an old CalculationRecord be traced back to the exact payload field it read, even if the rule's declared path has since changed.
+          example: $.tradeLicenseDetail.accessories[0].quantity
+        amount:
+          type: number
+          description: Computed, rounded amount. Negative for rebates/deductions.
+          example: 600
+        description:
+          type: string
+          description: Human-readable explanation, e.g. "₹200/unit × 3 (WEIGHING_SCALE)".
+          example: ₹200/unit × 3 (WEIGHING_SCALE)
+      x-businessRules:
+      - resolvedJsonPath is populated whenever the amount was derived from a raw payload field, and is null for components matched with an empty conditions object (rules that always apply, like a flat module-wide tax) since there is nothing to resolve.
+      - 'subEntityIndex is present only for line items produced by a scope: SUBENTITY rule; it is null for ENTITY-scope components and for anything computed once for the whole entity.'
+    EstimateRequest:
+      type: object
+      required:
+      - entityId
+      - entityDetail
+      properties:
+        entityId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Caller-supplied identifier of the business entity this calculation is for (the property, certificate, connection, etc.) — not a UUID format requirement, since the caller's own entity IDs may not be UUIDs. Used by billing to tie a demand back to the right entity, and by CalculationRecord search to find every calculation ever done for a given entity. Immutable for a given calculationId — supply a new estimate (not a recalculate) if the calculation is genuinely for a different entity.
+          example: b3a12c84-1234-4321-a9fc-2b983e55bca3
+        asOnDate:
+          type: string
+          format: date
+          description: Date to calculate as of; drives PENALTY/INTEREST. Defaults to today if omitted.
+          example: '2026-07-03'
+        entityDetail:
+          type: object
+          additionalProperties: true
+          description: The caller's own domain JSON, in whatever hierarchy it naturally exists. The engine reads only the JSONPaths declared by this module's active rules; every other field is ignored and does not need to be described anywhere.
+      x-businessRules:
+      - entityId is required on every /estimate call and is immutable for the lifetime of the resulting calculationId — /recalculate cannot change it.
+      - entityId is caller-defined and opaque to the engine — it is never matched against, never used in any rule condition, purely a foreign key for billing and CalculationRecord search.
+      description: Request payload to compute a fresh tax/fee breakup for one entity, against the caller's own raw JSON in whatever shape it naturally exists. module is resolved from the {module} path segment, not from this body.
+    EstimateResponse:
+      type: object
+      properties:
+        calculationId:
+          type: string
+          format: uuid
+          description: Submit this on `/recalculate`, `/confirm`, and `/cancel`.
+          example: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+        entityId:
+          type: string
+          description: Echoes the entityId supplied on /estimate.
+          example: b3a12c84-1234-4321-a9fc-2b983e55bca3
+        module:
+          type: string
+          example: TradeLicense
+          readOnly: true
+          description: The module this calculation was performed under, resolved from the path.
+        status:
+          type: string
+          enum:
+          - DRAFT
+          - CONFIRMED
+          - CANCELLED
+          example: DRAFT
+          description: Lifecycle state of this calculation. Always DRAFT immediately after estimate or recalculate — becomes CONFIRMED only once confirm is called, and this endpoint never returns CONFIRMED itself.
+        lineItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineItem'
+          description: The full, ordered breakup of every computed component.
+          example:
+          - component: STAFFING_FEE
+            ruleType: RATE_MATRIX
+            subEntityIndex: null
+            ruleId: 4ab96f75-6828-5673-c4gd-3d074g77bgb7
+            configVersion: 1
+            resolvedJsonPath: $.certificateDetail.employeeCount
+            amount: 1200
+            description: employeeCount band 10-24 → flat 1200
+          - component: CGST
+            ruleType: TAX
+            subEntityIndex: null
+            ruleId: c3d4e5f6-3333-4444-5555-666677778888
+            configVersion: 1
+            resolvedJsonPath: null
+            amount: 108
+            description: 9% of STAFFING_FEE (1200)
+        taxableAmount:
+          type: number
+          example: 3300
+          description: Sum of all RATE_MATRIX and ADJUSTMENT line items, before TAX-type components (CGST/SGST/cess) are applied.
+        totalAmount:
+          type: number
+          example: 3894
+          description: Final payable amount — sum of all line items after rounding.
+        generatedAt:
+          type: string
+          format: date-time
+          description: Server timestamp when this breakup was computed.
+          example: '2026-07-03T10:15:30Z'
+      description: Response returned after a successful estimate computation — the full line-item breakup plus the calculationId needed to recalculate, confirm, or cancel this draft.
+      x-businessRules:
+      - This endpoint never returns status CONFIRMED — a fresh estimate or a recalculate is always DRAFT until a separate confirm call succeeds.
+      - calculationId here is not yet persisted as a CalculationRecord — it only becomes durable and appears in calculation search once confirm is called.
+    RecalculateRequest:
+      type: object
+      required:
+      - calculationId
+      properties:
+        calculationId:
+          type: string
+          format: uuid
+          example: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+          description: The UUID returned by a previous estimate or recalculate call.
+        asOnDate:
+          type: string
+          format: date
+          example: '2026-08-15'
+          description: New date to recalculate time-based components against. Defaults to today if omitted.
+        entityDetail:
+          type: object
+          additionalProperties: true
+          description: Full replacement payload, if it has changed since the original estimate. If omitted, the previous payload is reused.
+      description: Request payload to recompute an existing, unconfirmed estimate — used when time has passed and PENALTY/INTEREST need fresh values, or when entityDetail has changed.
+      x-businessRules:
+      - calculationId must refer to a DRAFT (unconfirmed) calculation — recalculating a CONFIRMED or CANCELLED calculation is rejected with 409.
+      - entityId cannot be changed via recalculate — if entityDetail is supplied, it must still describe the same entityId the original estimate was created for.
+    ConfirmRequest:
+      type: object
+      required:
+      - calculationId
+      properties:
+        calculationId:
+          type: string
+          format: uuid
+          example: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+          description: The UUID returned by estimate or recalculate.
+      description: Request payload to confirm a DRAFT estimate into an immutable, payable CalculationRecord.
+      x-businessRules:
+      - calculationId must refer to a DRAFT calculation that has not already been confirmed or cancelled, or the request is rejected with 409.
+    CalculationRecord:
+      type: object
+      description: Immutable audit snapshot of a confirmed calculation, shaped for direct forwarding to a billing service.
+      properties:
+        calculationId:
+          type: string
+          format: uuid
+          description: The UUID of this calculation, unchanged from the original estimate call.
+          example: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+        entityId:
+          type: string
+          readOnly: true
+          description: The entityId this calculation was performed for, snapshotted from /estimate.
+          example: b3a12c84-1234-4321-a9fc-2b983e55bca3
+        module:
+          type: string
+          readOnly: true
+          description: The module this calculation was performed under.
+          example: trade-license
+        status:
+          type: string
+          enum:
+          - CONFIRMED
+          description: Always CONFIRMED for a record returned by this endpoint; CANCELLED after a successful cancel.
+          example: CONFIRMED
+        entityDetailSnapshot:
+          type: object
+          additionalProperties: true
+          description: The exact entityDetail payload used at confirmation time.
+        lineItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineItem'
+          description: The full, ordered breakup of every computed component, frozen at confirmation time.
+          example:
+          - component: STAFFING_FEE
+            ruleType: RATE_MATRIX
+            subEntityIndex: null
+            ruleId: 4ab96f75-6828-5673-c4gd-3d074g77bgb7
+            configVersion: 1
+            resolvedJsonPath: $.certificateDetail.employeeCount
+            amount: 1200
+            description: employeeCount band 10-24 → flat 1200
+          - component: CGST
+            ruleType: TAX
+            subEntityIndex: null
+            ruleId: c3d4e5f6-3333-4444-5555-666677778888
+            configVersion: 1
+            resolvedJsonPath: null
+            amount: 108
+            description: 9% of STAFFING_FEE (1200)
+        totalAmount:
+          type: number
+          description: Final payable amount, locked in at confirmation and never recomputed.
+          example: 1478
+        confirmedAt:
+          type: string
+          format: date-time
+          description: Server timestamp when this record was confirmed.
+          example: '2026-07-03T10:20:00Z'
+        auditDetail:
+          $ref: '#/components/schemas/AuditDetail'
+      x-businessRules:
+      - A CalculationRecord is immutable once created — its lineItems, configVersion snapshots, and totalAmount never change, even if the underlying rules are later edited. Recomputing for the same entity requires a new estimate.
+      - entityDetailSnapshot preserves the exact payload used, so an old record can always be re-derived and audited even after the caller's own domain object shape has since changed.
+    CalculationRecordResponse:
+      type: object
+      properties:
+        calculationRecord:
+          $ref: '#/components/schemas/CalculationRecord'
+      description: Wrapper response containing a single CalculationRecord.
+    CancelRequest:
+      type: object
+      required:
+      - calculationId
+      properties:
+        calculationId:
+          type: string
+          format: uuid
+          example: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+          description: The UUID of the calculation to cancel.
+        reason:
+          type: string
+          maxLength: 256
+          example: Duplicate demand raised in error
+          description: Optional free-text reason, retained for audit.
+      description: Request payload to cancel a calculation, whether it is still DRAFT or already CONFIRMED.
+      x-businessRules:
+      - Cancelling a CONFIRMED calculation does not automatically reverse or refund any demand already raised in the billing service — that reconciliation is the caller's responsibility.
+    CancelResponse:
+      type: object
+      properties:
+        cancelled:
+          type: boolean
+          example: true
+          description: true if an active (DRAFT or CONFIRMED) calculation was found and cancelled; false if it was already cancelled.
+        calculationId:
+          type: string
+          format: uuid
+          example: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+          description: The calculationId that was targeted.
+      description: Response returned after a cancellation attempt.
+      x-businessRules:
+      - 'cancelled is idempotent — calling cancel again on an already-cancelled calculationId still returns 200 with cancelled: false, never an error.'
+    CalculationRecordListResponse:
+      type: object
+      description: Paginated list of CalculationRecords, typically filtered by entityId.
+      properties:
+        totalCount:
+          type: integer
+          example: 3
+          description: Total number of matching CalculationRecords, independent of pagination.
+        page:
+          type: integer
+          example: 0
+          description: The page number returned, matching the page query parameter.
+        size:
+          type: integer
+          example: 20
+          description: The page size returned, matching the size query parameter.
+        calculationRecords:
+          type: array
+          items:
+            $ref: '#/components/schemas/CalculationRecord'
+          description: The matching CalculationRecords for this page.
+          example:
+          - calculationId: 8a2c4a74-11e5-4c3e-9d9f-f7f4c0b1b9a3
+            status: CONFIRMED
+            totalAmount: 1478
+      x-businessRules:
+      - Only CONFIRMED and CANCELLED records are returned — DRAFT estimates are never persisted and so never appear here, even if a matching calculationId exists in memory on the client side.

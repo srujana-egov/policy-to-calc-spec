@@ -494,10 +494,14 @@ whatever both still miss.
   Registry service source" claim missed, only found once actually built and run live: the
   registry service's data-write route doesn't nest under `/schema` the way the spec/Postman
   examples show, and `x-unique`/`x-indexes` are top-level request fields, not nested inside
-  `definition` — see `registry-prototype/README.md` for the full account. No equivalent
-  real-source check was possible for the Calculation Engine — see
-  `calc-engine-prototype/README.md`'s opening section for why (no such service exists anywhere in
-  the digitnxt org to check against).
+  `definition` — see `registry-prototype/README.md` for the full account. The Calculation Engine
+  couldn't be checked against real source for most of this project's life (no such service could
+  be found anywhere in the digitnxt org) — that gap has since closed: the real
+  `calculation-engine-3.0.0.yaml` OpenAPI spec was found (confirmed from the platform team) and
+  `calc-engine-prototype/` re-verified against it, finding two more real, same-shaped bugs (a
+  missing `/calculation/v3` path prefix, and a bulk-array write body where the real contract wants
+  one `POST` per rule) — see `calc-engine-prototype/README.md`'s "Spec found and verified" section
+  for the full account.
 - **Open, not resolved here:** the Step 1 certificate-type/module distinction, and whether Steps
   3 and 4 ever need to share data (a workflow action referencing an entity field, for instance —
   not designed for, and `x-ref-schema` in the Registry service is the most likely mechanism if
