@@ -21,9 +21,32 @@ Real discrepancies found during that verification, worth remembering here:
 but out of scope here, same reasoning as EscalationConfig being out of scope for the workflow
 wizard -- this prototype covers property/constraint/index authoring and record entry, not
 cross-schema linking or webhook wiring.
+
+Nested object properties (one level deep -- a field like `address` with its own `city`/`pincode`
+sub-fields) *are* modeled, added after scraping real schemas across the digitnxt org turned up
+the same pattern independently three times: the official `pgr2-registry-schema.yaml` tutorial,
+`digit-specs/v3.0.0/registry.yaml`'s own canonical `trade-license` example (an `address` object
+with a required `city` sub-field), and `examples/pgr/pgr-schemas/registry-schema.yaml`. Deeper
+nesting (an object inside an object inside an object) was never seen in any real example, so
+`PropertyDef.properties` isn't itself further restricted, but the wizard only ever asks for one
+level -- see `wizard.py`.
+
+`pattern` and `minimum`/`maximum` are modeled for the same reason: the `pgr2` tutorial uses
+`pattern` for a 10-digit mobile number and a 6-digit pincode, and `minimum`/`maximum` for
+latitude/longitude bounds.
+
+`minLength`/`maxLength` are modeled too, on weaker but still real evidence: `license-certificate/
+Schema-Registry-3.0.0.yaml` uses them repeatedly (e.g. an 8-128 character `Idempotency-Key`
+header), but on checking closely that file has no `schemaCode`/`x-indexes`/`x-unique` anywhere --
+it's a *different* OpenAPI spec for that project's own module/UI-config API, not a registry
+schema-authoring contract, and the `minLength`/`maxLength` usages found are on OpenAPI *request
+parameters* (headers/paths), not registry `definition.properties` fields. They're still standard
+JSON Schema 2020-12 keywords (the exact dialect the registry's own `definition` field declares),
+so supporting them is low-risk and consistent with `pattern`/`minimum`/`maximum` -- just not
+backed by the same strength of "found literally inside a real registry schema" evidence.
 """
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,6 +65,20 @@ class PropertyDef(BaseModel):
     format: Optional[str] = None
     enum: Optional[list[str]] = None
     description: Optional[str] = None
+    pattern: Optional[str] = None
+    # Union[int, float], not float: pydantic's "smart" union mode keeps an int input (e.g. the
+    # real pgr2 example's `minimum: -90`) as an int on output, rather than coercing to `-90.0` and
+    # producing JSON that doesn't match the real schema byte-for-byte.
+    minimum: Optional[Union[int, float]] = None
+    maximum: Optional[Union[int, float]] = None
+    minLength: Optional[int] = None
+    maxLength: Optional[int] = None
+    # One level of nesting only (see module docstring) -- meaningful only when type == "object".
+    properties: Optional[dict[str, "PropertyDef"]] = None
+    required: Optional[list[str]] = None
+
+
+PropertyDef.model_rebuild()
 
 
 class IndexDef(BaseModel):

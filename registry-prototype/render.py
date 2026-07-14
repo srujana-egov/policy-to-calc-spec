@@ -34,12 +34,29 @@ def render_schema_preview(schema: SchemaRequest, out_path: str) -> str:
     for name, prop in definition.properties.items():
         required = name in definition.required
         enum_html = "".join(f'<span class="role-tag">{v}</span>' for v in (prop.enum or [])) or "&mdash;"
+        type_label = prop.type
+        if prop.format:
+            type_label += f" ({prop.format})"
+        if prop.type == "object" and prop.properties:
+            type_label += f" -- group of {len(prop.properties)} field(s)"
+        constraint_bits = []
+        if prop.pattern:
+            constraint_bits.append(f"pattern: {prop.pattern}")
+        if prop.minimum is not None:
+            constraint_bits.append(f"min: {prop.minimum}")
+        if prop.maximum is not None:
+            constraint_bits.append(f"max: {prop.maximum}")
+        if prop.minLength is not None:
+            constraint_bits.append(f"minLength: {prop.minLength}")
+        if prop.maxLength is not None:
+            constraint_bits.append(f"maxLength: {prop.maxLength}")
+        constraint_html = " / ".join(constraint_bits)
         rows.append(f'''
         <tr class="field-row" onclick="showField('{name}')">
           <td><b>{name}</b></td>
-          <td>{prop.type}{f" ({prop.format})" if prop.format else ""}</td>
+          <td>{type_label}</td>
           <td class="{'required' if required else 'optional'}">{"required" if required else "optional"}</td>
-          <td>{enum_html}</td>
+          <td>{enum_html}{f"<br>{constraint_html}" if constraint_html else ""}</td>
           <td>{prop.description or ""}</td>
         </tr>''')
         field_details[name] = json.loads(prop.model_dump_json(exclude_none=True))
@@ -87,12 +104,20 @@ def render_schema_preview(schema: SchemaRequest, out_path: str) -> str:
     return out_path
 
 
+def _format_cell_value(value) -> str:
+    if isinstance(value, dict):
+        return "; ".join(f"{k}: {v}" for k, v in value.items())
+    if value is None:
+        return ""
+    return str(value)
+
+
 def render_data_preview(schema: SchemaRequest, records: list[dict], out_path: str) -> str:
     field_names = list(schema.definition.properties.keys())
     header = "".join(f"<th>{name}</th>" for name in field_names)
     body_rows = []
     for i, record in enumerate(records, start=1):
-        cells = "".join(f"<td>{record.get(name, '')}</td>" for name in field_names)
+        cells = "".join(f"<td>{_format_cell_value(record.get(name))}</td>" for name in field_names)
         body_rows.append(f"<tr><td>{i}</td>{cells}</tr>")
 
     html = f"""<!DOCTYPE html>

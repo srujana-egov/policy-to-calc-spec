@@ -19,7 +19,25 @@ from wizard import _registry_headers, ask, ask_yes_no
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
+def ask_nested_record_value(field_name: str, prop: PropertyDef, required: bool):
+    """One level of nesting -- a group-of-fields value (e.g. 'address') asked as its own set of
+    sub-questions, matching how ../wizard.py authors it. An optional group can be skipped
+    entirely; a required one always asks its own sub-fields (which may themselves be optional)."""
+    if not required and not ask_yes_no(f"  Include '{field_name}'?"):
+        return None
+    print(f"  --- {field_name} ---")
+    nested = {}
+    for sub_name, sub_prop in (prop.properties or {}).items():
+        value = ask_record_value(sub_name, sub_prop, sub_name in (prop.required or []))
+        if value is not None:
+            nested[sub_name] = value
+    return nested or None
+
+
 def ask_record_value(field_name: str, prop: PropertyDef, required: bool):
+    if prop.type == "object" and prop.properties:
+        return ask_nested_record_value(field_name, prop, required)
+
     suffix = " (required)" if required else " (optional, blank to skip)"
 
     if prop.enum:

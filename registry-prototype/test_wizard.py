@@ -17,6 +17,7 @@ from unittest import mock
 import data_entry
 import wizard
 from builder import SchemaBuilder
+from test_schema_builder import canonicalize_built, canonicalize_real_world, load_real_world
 from validate import validate_schema_request
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -95,6 +96,51 @@ def test_wiz_02_license_registry_data_matches_golden():
     check("wiz02-matches-golden", records == golden)
 
 
+def test_wiz_02b_trade_license_schema_with_nested_field_matches_real_schema():
+    """Drives the actual interactive nested-object flow (choosing 'a group of related fields',
+    then configure_nested_fields()'s own sub-question loop) against digit-specs' own canonical
+    trade-license example -- not just SchemaBuilder called directly, the real Q&A a person
+    would answer, including one required and one optional sub-field."""
+    answers = load_lines("trade_license_session.txt")
+    schema, leftover = run_schema_session_with(answers)
+    check("wiz02b-all-input-consumed", not leftover, leftover)
+    check("wiz02b-validates-clean", not validate_schema_request(schema))
+    real = canonicalize_real_world(load_real_world("trade_license.json"))
+    check("wiz02b-matches-real-schema", canonicalize_built(schema) == real, canonicalize_built(schema))
+    address = schema.definition.properties["address"]
+    check("wiz02b-city-required", address.required == ["city"], address.required)
+    check("wiz02b-pincode-optional", "pincode" not in (address.required or []))
+
+
+def test_wiz_02c_nested_record_entry_via_interactive_flow():
+    """The data-entry side of the same nested field -- ask_nested_record_value()'s own
+    sub-question loop, driven through run_data_session() like a person would answer it."""
+    schema, _ = run_schema_session_with(load_lines("trade_license_session.txt"))
+    answers = [
+        "ACME-001", "Acme Trading Co", "RETAIL",  # applicantId, businessName, tradeType
+        "yes",                                      # include 'address'? (optional group)
+        "Springfield", "",                             # city (required), pincode (optional, blank)
+        "no",                                            # add another record?
+        "yes",                                              # confirm
+    ]
+    records, leftover = run_data_session_with(schema, answers)
+    check("wiz02c-all-input-consumed", not leftover, leftover)
+    check("wiz02c-nested-value-correct", records[0]["address"] == {"city": "Springfield"}, records[0])
+
+
+def test_wiz_02d_optional_nested_group_can_be_skipped_entirely():
+    schema, _ = run_schema_session_with(load_lines("trade_license_session.txt"))
+    answers = [
+        "ACME-002", "Acme Trading Co 2", "WHOLESALE",
+        "no",                                          # skip 'address' entirely
+        "no",
+        "yes",
+    ]
+    records, leftover = run_data_session_with(schema, answers)
+    check("wiz02d-all-input-consumed", not leftover, leftover)
+    check("wiz02d-no-address-key", "address" not in records[0], records[0])
+
+
 # ---------------------------------------------------------------------------
 # Schema-phase edge cases
 # ---------------------------------------------------------------------------
@@ -112,7 +158,7 @@ def test_wiz_03_quit_cancels_mid_session():
 def test_wiz_04_invalid_type_choice_reasks():
     answers = [
         "x",
-        "Name", "9", "1", "yes", "",   # type choice: invalid '9' first, then valid '1'
+        "Name", "9", "1", "no", "no", "yes", "",   # invalid '9' first, then '1' (text, no pattern/length)
         "",                             # done adding fields
         "no", "no",                     # no unique constraint, no index
         "yes",                          # confirm
@@ -125,12 +171,12 @@ def test_wiz_04_invalid_type_choice_reasks():
 def test_wiz_05_redo_field_after_no():
     answers = [
         "x",
-        "Age", "2", "no", "",           # Age: integer, not required, no description
+        "Age", "2", "no", "no", "",      # Age: integer, no min/max, not required, no description
         "",                              # done adding fields
         "no", "no",                      # no unique, no index
         "no",                              # confirm: not right
         "age",                              # fix target: redo 'age'
-        "2", "yes", "the person's age",       # redo: still integer, now required, with description
+        "2", "no", "yes", "the person's age",  # redo: integer, no min/max, now required, with description
         "yes",                                 # confirm: yes
     ]
     schema, leftover = run_schema_session_with(answers)
@@ -144,12 +190,12 @@ def test_wiz_05_redo_field_after_no():
 def test_wiz_06_add_field_via_offer_fix():
     answers = [
         "x",
-        "Name", "1", "yes", "",
+        "Name", "1", "no", "no", "yes", "",
         "",
         "no", "no",
         "no",                            # confirm: not right
         "add",                             # fix target: add a new field
-        "Age", "2", "no", "",                # the new field's own questions
+        "Age", "2", "no", "no", "",           # the new field's own questions (integer, no min/max)
         "yes",                                 # confirm: yes
     ]
     schema, leftover = run_schema_session_with(answers)
@@ -163,8 +209,8 @@ def test_wiz_07_delete_field_then_fix_dangling_unique_constraint():
     composed loop, matching the analogous test in ../workflow-prototype/test_wizard.py."""
     answers = [
         "x",
-        "Name", "1", "yes", "",
-        "Mistake", "1", "no", "",        # a field that will be deleted
+        "Name", "1", "no", "no", "yes", "",
+        "Mistake", "1", "no", "no", "no", "",   # a field that will be deleted
         "",                                # done adding fields
         "yes", "name, mistake", "no",      # unique constraint referencing both fields
         "no",                                # no index
@@ -184,7 +230,7 @@ def test_wiz_07_delete_field_then_fix_dangling_unique_constraint():
 def test_wiz_08_rename_schema_code_via_offer_fix():
     answers = [
         "old-code",
-        "Name", "1", "yes", "",
+        "Name", "1", "no", "no", "yes", "",
         "",
         "no", "no",
         "no",                    # confirm: not right

@@ -1,0 +1,62 @@
+{
+  "schemaCode": "trade-license",
+  "definition": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "applicantId": {
+        "type": "string"
+      },
+      "businessName": {
+        "type": "string"
+      },
+      "tradeType": {
+        "type": "string"
+      },
+      "address": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "pincode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city"
+        ]
+      }
+    },
+    "required": [
+      "applicantId",
+      "businessName",
+      "tradeType"
+    ]
+  },
+  "x-unique": [
+    [
+      "businessName"
+    ],
+    [
+      "applicantId",
+      "tradeType"
+    ]
+  ],
+  "x-ref-schema": [
+    {
+      "fieldPath": "applicantId",
+      "schemaCode": "individual",
+      "refField": "registryId",
+      "external": true,
+      "registry": "individual-registry"
+    }
+  ],
+  "x-indexes": [
+    {
+      "name": "idx_trade_type",
+      "fieldPath": "tradeType",
+      "method": "btree"
+    }
+  ]
+}

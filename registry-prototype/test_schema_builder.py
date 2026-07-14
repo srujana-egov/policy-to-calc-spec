@@ -2,18 +2,54 @@
 ../workflow-prototype/test_workflow_builder.py's role for the registry side -- the real
 license-registry example (matching the actual registry service's own Postman collection payload)
 built entirely through builder calls, plus one test per completeness check.
+
+Also replays three more real schemas found by scraping the entire digitnxt GitHub org (not just
+digit3) for registry examples: `pgr2` (a real tutorial schema -- nested objects, pattern,
+minimum/maximum), `trade-license` (digit-specs' own canonical example -- nested object with a
+required sub-field, two unique constraints), and `PGR.ServiceCategory` (a real schema code
+containing a dot, which the original schema-code regex would have rejected).
 """
+
+import json
+from pathlib import Path
 
 from builder import SchemaBuilder, camel_field_name
 from models import IndexDef, PropertyDef, SchemaDefinition, SchemaRequest
 from validate import validate_schema_request
 
+FIXTURES = Path(__file__).parent / "fixtures"
 PASSED = []
 
 
 def check(name, condition, detail=""):
     assert condition, f"{name} FAILED: {detail}"
     PASSED.append(name)
+
+
+def load_real_world(name: str) -> dict:
+    return json.loads((FIXTURES / "real_world" / name).read_text())
+
+
+def canonicalize_real_world(real: dict) -> dict:
+    """Strips fields this prototype deliberately doesn't model, so a real-world fixture can be
+    compared against what we actually build: `additionalProperties` (this prototype always
+    forces it to `false` for safety; some real examples simply omit it, which JSON Schema treats
+    as `true` -- a deliberate difference, not an oversight), `x-ref-schema` (cross-schema
+    references, out of scope, same reasoning as EscalationConfig for the workflow wizard), and
+    `version`/`isActive` (server-assigned response fields, never part of a create request)."""
+    result = json.loads(json.dumps(real))
+    result["definition"].pop("additionalProperties", None)
+    result.pop("x-ref-schema", None)
+    result.pop("version", None)
+    result.pop("isActive", None)
+    result.pop("_comment_x_indexes_moved", None)
+    return result
+
+
+def canonicalize_built(schema: SchemaRequest) -> dict:
+    result = json.loads(schema.model_dump_json(by_alias=True, exclude_none=True))
+    result["definition"].pop("additionalProperties", None)
+    return result
 
 
 def build_license_registry() -> SchemaBuilder:
@@ -106,6 +142,211 @@ def test_10_remove_field_also_removes_from_required():
 def test_11_no_false_positives():
     errors = validate_schema_request(build_license_registry().build())
     check("11-no-false-positives", not errors, errors)
+
+
+# ---------------------------------------------------------------------------
+# Real schemas scraped from across the digitnxt org (fixtures/real_world/)
+# ---------------------------------------------------------------------------
+
+def build_pgr_service_category() -> SchemaBuilder:
+    """examples/pgr/pgr-schemas/pgr-service-category-schema.yaml -- schemaCode contains a dot."""
+    b = SchemaBuilder("PGR.ServiceCategory")
+    b.add_field("code", "string", required=True)
+    b.add_field("name", "string", required=True)
+    b.add_field("active", "boolean")
+    return b
+
+
+def test_12_pgr_service_category_matches_real_schema():
+    schema = build_pgr_service_category().build()
+    check("12-validates-clean", not validate_schema_request(schema))
+    real = canonicalize_real_world(load_real_world("pgr_service_category.json"))
+    check("12-matches-real-schema", canonicalize_built(schema) == real, canonicalize_built(schema))
+
+
+def build_trade_license() -> SchemaBuilder:
+    """digit-specs/v3.0.0/registry.yaml's own canonical example -- a nested object (`address`)
+    with a required sub-field, and two unique constraints (one single-field, one compound)."""
+    b = SchemaBuilder("trade-license")
+    b.add_field("applicantId", "string", required=True)
+    b.add_field("businessName", "string", required=True)
+    b.add_field("tradeType", "string", required=True)
+    address = b.add_field("address", "object")
+    b.add_nested_field(address, "city", "string", required=True)
+    b.add_nested_field(address, "pincode", "string")
+    b.add_unique_constraint(["businessName"])
+    b.add_unique_constraint(["applicantId", "tradeType"])
+    b.add_index("tradeType", name="idx_trade_type")
+    return b
+
+
+def test_13_trade_license_matches_real_schema():
+    schema = build_trade_license().build()
+    check("13-validates-clean", not validate_schema_request(schema))
+    real = canonicalize_real_world(load_real_world("trade_license.json"))
+    check("13-matches-real-schema", canonicalize_built(schema) == real, canonicalize_built(schema))
+
+
+def build_pgr2() -> SchemaBuilder:
+    """docs/tutorials/backend/pgr2-registry-schema.yaml -- a real tutorial schema using pattern
+    (10-digit mobile, 6-digit pincode), minimum/maximum (lat/long bounds), and nested objects.
+    `address` nests a full second level (`address.auditDetails`, itself with its own sub-fields)
+    -- deeper than the wizard's own one-level-only UX limit (see wizard.py), so that specific
+    sub-object is constructed directly via PropertyDef rather than through
+    SchemaBuilder.add_nested_field(), which only supports one level by design. The model itself
+    has no depth restriction; only the interactive wizard does."""
+    b = SchemaBuilder("pgr2")
+    plain_fields = [
+        ("serviceRequestId", "Unique identifier for the service request"),
+        ("tenantId", "Tenant identifier"),
+        ("serviceCode", "Code identifying the type of service"),
+        ("description", "Description of the service request"),
+        ("accountId", "Account identifier of the requester"),
+        ("source", "Source of the service request"),
+        ("applicationStatus", "Current status of the application"),
+        ("action", "Action to be performed"),
+        ("fileStoreId", "File store identifier for attachments"),
+        ("boundaryCode", "Boundary/ward code where service is requested"),
+        ("individualId", "Individual identifier of the requester"),
+    ]
+    for name, desc in plain_fields:
+        b.add_field(name, "string", required=(name in ("serviceRequestId", "tenantId")), description=desc)
+    b.add_field("email", "string", format="email", description="Email address of the requester")
+    b.add_field("mobile", "string", pattern="^[0-9]{10}$", description="Mobile number of the requester")
+    b.add_field("processId", "string", description="Process identifier for workflow")
+    b.add_field("workflowInstanceId", "string", description="Workflow instance identifier")
+
+    audit = b.add_field("auditDetails", "object", description="Audit information for the record")
+    for name, type_, format_ in [("createdBy", "string", None), ("createdTime", "integer", "int64"),
+                                  ("lastModifiedBy", "string", None), ("lastModifiedTime", "integer", "int64")]:
+        b.add_nested_field(audit, name, type_, format=format_)
+
+    address = b.add_field("address", "object", description="Address information for the service request")
+    for name, type_, extra in [
+        ("id", "string", {}), ("serviceRequestId", "string", {}), ("address", "string", {}),
+        ("city", "string", {}), ("pincode", "string", {"pattern": "^[0-9]{6}$"}),
+        ("latitude", "number", {"format": "double", "minimum": -90, "maximum": 90}),
+        ("longitude", "number", {"format": "double", "minimum": -180, "maximum": 180}),
+    ]:
+        b.add_nested_field(address, name, type_, **extra)
+
+    b.properties[address].properties["auditDetails"] = PropertyDef(
+        type="object",
+        properties={
+            "createdBy": PropertyDef(type="string"),
+            "createdTime": PropertyDef(type="integer", format="int64"),
+            "lastModifiedBy": PropertyDef(type="string"),
+            "lastModifiedTime": PropertyDef(type="integer", format="int64"),
+        },
+    )
+
+    b.add_index("serviceRequestId", name="idx_pgr2_service_request_id")
+    b.add_index("tenantId", name="idx_pgr2_tenant_id")
+    b.add_index("applicationStatus", name="idx_pgr2_application_status")
+    b.add_index("boundaryCode", method="gin")
+    return b
+
+
+def test_14_pgr2_matches_real_schema():
+    schema = build_pgr2().build()
+    check("14-validates-clean", not validate_schema_request(schema))
+    real = canonicalize_real_world(load_real_world("pgr2.json"))
+    check("14-matches-real-schema", canonicalize_built(schema) == real, canonicalize_built(schema))
+    check("14-two-level-nesting-preserved",
+          schema.definition.properties["address"].properties["auditDetails"].properties["createdBy"].type == "string")
+
+
+# ---------------------------------------------------------------------------
+# New completeness checks (pattern/minimum/maximum/nested sub-fields)
+# ---------------------------------------------------------------------------
+
+def test_15_dotted_schema_code_is_valid():
+    """The original regex (no dots) would have rejected examples/pgr/pgr-schemas/
+    pgr-service-category-schema.yaml's own real schemaCode."""
+    errors = validate_schema_request(build_pgr_service_category().build())
+    check("15-dotted-code-accepted", not any("schemaCode" in e for e in errors), errors)
+
+
+def test_16_pattern_on_non_string_caught():
+    schema = SchemaRequest(schemaCode="x", definition=SchemaDefinition(
+        properties={"a": PropertyDef(type="integer", pattern="^[0-9]+$")}))
+    errors = validate_schema_request(schema)
+    check("16-pattern-on-non-string-caught", any("has a pattern but type 'integer'" in e for e in errors), errors)
+
+
+def test_17_minmax_on_non_numeric_caught():
+    schema = SchemaRequest(schemaCode="x", definition=SchemaDefinition(
+        properties={"a": PropertyDef(type="string", minimum=1, maximum=10)}))
+    errors = validate_schema_request(schema)
+    check("17-minmax-on-non-numeric-caught", any("has a minimum/maximum but type 'string'" in e for e in errors), errors)
+
+
+def test_18_minimum_greater_than_maximum_caught():
+    schema = SchemaRequest(schemaCode="x", definition=SchemaDefinition(
+        properties={"a": PropertyDef(type="number", minimum=10, maximum=1)}))
+    errors = validate_schema_request(schema)
+    check("18-min-gt-max-caught", any("minimum (10) greater than maximum (1)" in e for e in errors), errors)
+
+
+def test_19_dangling_required_in_nested_group_caught():
+    schema = SchemaRequest(schemaCode="x", definition=SchemaDefinition(properties={
+        "address": PropertyDef(type="object", properties={"city": PropertyDef(type="string")},
+                                required=["city", "ghostSubField"]),
+    }))
+    errors = validate_schema_request(schema)
+    check("19-nested-dangling-required-caught",
+          any("'ghostSubField' is listed as required under 'address'" in e for e in errors), errors)
+
+
+def test_20_sub_fields_on_non_object_caught():
+    schema = SchemaRequest(schemaCode="x", definition=SchemaDefinition(properties={
+        "a": PropertyDef(type="string", properties={"b": PropertyDef(type="string")}),
+    }))
+    errors = validate_schema_request(schema)
+    check("20-sub-fields-on-non-object-caught", any("has sub-fields but type 'string'" in e for e in errors), errors)
+
+
+def test_21_pgr2_pattern_and_minmax_are_valid():
+    """The real pgr2 schema's own pattern/minimum/maximum usage shouldn't trip the new checks --
+    confirms 15-20 aren't trigger-happy against genuinely valid real-world constraints."""
+    errors = validate_schema_request(build_pgr2().build())
+    check("21-pgr2-no-false-positives", not errors, errors)
+
+
+def test_22_minlength_maxlength_on_non_string_caught():
+    schema = SchemaRequest(schemaCode="x", definition=SchemaDefinition(
+        properties={"a": PropertyDef(type="integer", minLength=1, maxLength=10)}))
+    errors = validate_schema_request(schema)
+    check("22-minmaxlength-on-non-string-caught",
+          any("has a minLength/maxLength but type 'integer'" in e for e in errors), errors)
+
+
+def test_23_minlength_greater_than_maxlength_caught():
+    schema = SchemaRequest(schemaCode="x", definition=SchemaDefinition(
+        properties={"a": PropertyDef(type="string", minLength=10, maxLength=1)}))
+    errors = validate_schema_request(schema)
+    check("23-minlength-gt-maxlength-caught",
+          any("minLength (10) greater than maxLength (1)" in e for e in errors), errors)
+
+
+def build_password_field_schema() -> SchemaBuilder:
+    """A synthetic example (not scraped -- see models.py's docstring on why the minLength/
+    maxLength evidence is weaker than pattern/minimum/maximum's), matching the shape of a real
+    8-128-char constraint found in license-certificate/Schema-Registry-3.0.0.yaml, applied there
+    to an OpenAPI header parameter rather than a registry schema field."""
+    b = SchemaBuilder("user-account")
+    b.add_field("username", "string", required=True, minLength=2, maxLength=64)
+    b.add_field("password", "string", required=True, minLength=8, maxLength=128)
+    return b
+
+
+def test_24_minlength_maxlength_builds_and_validates():
+    schema = build_password_field_schema().build()
+    errors = validate_schema_request(schema)
+    check("24-builds-clean", not errors, errors)
+    check("24-password-bounds",
+          schema.definition.properties["password"].minLength == 8 and
+          schema.definition.properties["password"].maxLength == 128)
 
 
 if __name__ == "__main__":

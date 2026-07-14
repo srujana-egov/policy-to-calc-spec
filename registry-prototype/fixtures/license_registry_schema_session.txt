@@ -1,10 +1,14 @@
 license-registry
 License Number
 1
+no
+no
 yes
 Unique license identifier
 Holder Name
 1
+no
+no
 yes
 
 Issue Date

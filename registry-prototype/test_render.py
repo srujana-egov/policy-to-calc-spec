@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 from render import render_data_preview, render_schema_preview
-from test_schema_builder import build_license_registry
+from test_schema_builder import build_license_registry, build_pgr2, build_trade_license
 
 PASSED = []
 
@@ -80,6 +80,48 @@ def test_render_05_data_preview_missing_optional_field_renders_blank_not_crashin
         render_data_preview(schema, records, str(out))
         html = out.read_text()
     check("render05-does-not-crash-and-renders", "DL-003" in html)
+
+
+def test_render_06_nested_group_labeled_and_no_external_refs():
+    schema = build_trade_license().build()
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "s.html"
+        render_schema_preview(schema, str(out))
+        html = out.read_text()
+    check("render06-group-labeled", "group of 2 field(s)" in html, html)
+    check("render06-nested-fields-in-detail-json", "city" in html and "pincode" in html)
+    for pattern in EXTERNAL_REF_PATTERNS:
+        check(f"render06-no-{pattern.strip('(:/@')}", pattern not in html, pattern)
+
+
+def test_render_07_pattern_and_minmax_shown_and_no_external_refs():
+    schema = build_pgr2().build()
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "s.html"
+        render_schema_preview(schema, str(out))
+        html = out.read_text()
+    # mobile's pattern is a top-level field, so it shows directly in the table's constraint hint.
+    check("render07-top-level-pattern-shown-in-table", "pattern: ^[0-9]{10}$" in html, "mobile's pattern")
+    # latitude/longitude are nested two levels deep (address.latitude) -- their minimum/maximum
+    # only show in the click-to-expand detail JSON (which dumps the whole nested PropertyDef),
+    # not the outer table row, since that's scoped to top-level fields only.
+    check("render07-nested-min-in-detail-json", '"minimum": -90' in html, "latitude's minimum")
+    check("render07-nested-max-in-detail-json", '"maximum": 90' in html, "latitude's maximum")
+    check("render07-does-not-crash-on-two-level-nesting", "auditDetails" in html)
+    for pattern in EXTERNAL_REF_PATTERNS:
+        check(f"render07-no-{pattern.strip('(:/@')}", pattern not in html, pattern)
+
+
+def test_render_08_nested_data_value_formatted_readably():
+    schema = build_trade_license().build()
+    records = [{"applicantId": "A1", "businessName": "Acme", "tradeType": "RETAIL",
+                "address": {"city": "Springfield", "pincode": "62704"}}]
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "d.html"
+        render_data_preview(schema, records, str(out))
+        html = out.read_text()
+    check("render08-nested-value-readable", "city: Springfield" in html and "pincode: 62704" in html, html)
+    check("render08-not-python-repr", "{'city'" not in html, html)
 
 
 if __name__ == "__main__":

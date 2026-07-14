@@ -48,24 +48,109 @@ _FIELD_TYPE_OPTIONS = {
     "4": ("boolean", None, "yes/no"),
     "5": ("string", "date", "date"),
     "6": ("string", None, "one of a fixed list of choices"),
+    "7": ("object", None, "a group of related fields (e.g. an address with street/city/zip)"),
 }
 
 
-def ask_field_type(label: str) -> tuple[str, str | None, list[str] | None]:
+def ask_text_pattern(label: str) -> str | None:
+    if not ask_yes_no(f"  Does '{label}' need to be an exact number of digits (like a phone "
+                       "number or pincode)?"):
+        return None
+    raw = ask("  How many digits exactly?")
+    if raw.isdigit():
+        return f"^[0-9]{{{raw}}}$"
+    print("  couldn't parse that as a number of digits -- skipping the pattern for now")
+    return None
+
+
+def ask_optional_number(prompt: str) -> float | None:
+    raw = ask(prompt)
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        print("  couldn't parse that as a number -- skipping")
+        return None
+    return int(value) if value == int(value) else value
+
+
+def ask_optional_int(prompt: str) -> int | None:
+    raw = ask(prompt)
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        print("  couldn't parse that as a whole number -- skipping")
+        return None
+
+
+def ask_number_bounds(label: str) -> tuple[float | None, float | None]:
+    if not ask_yes_no(f"  Does '{label}' need a minimum or maximum allowed value?"):
+        return None, None
+    minimum = ask_optional_number("  Smallest allowed value? (blank for no minimum)")
+    maximum = ask_optional_number("  Largest allowed value? (blank for no maximum)")
+    return minimum, maximum
+
+
+def ask_text_length_bounds(label: str) -> tuple[int | None, int | None]:
+    if not ask_yes_no(f"  Does '{label}' need a minimum or maximum length?"):
+        return None, None
+    min_length = ask_optional_int("  Shortest allowed length? (blank for no minimum)")
+    max_length = ask_optional_int("  Longest allowed length? (blank for no maximum)")
+    return min_length, max_length
+
+
+def ask_field_type(label: str, allow_group: bool = True) -> dict:
+    """Returns a dict with type/format/enum/pattern/minimum/maximum/minLength/maxLength --
+    allow_group=False excludes the 'group of fields' option, since nesting only goes one level
+    deep (see models.py)."""
+    options = dict(_FIELD_TYPE_OPTIONS)
+    if not allow_group:
+        del options["7"]
     print(f"  What kind of value does '{label}' hold?")
-    for key, (_, _, description) in _FIELD_TYPE_OPTIONS.items():
+    for key, (_, _, description) in options.items():
         print(f"    {key}. {description}")
     while True:
-        choice = ask("  Pick 1-6:")
-        if choice in _FIELD_TYPE_OPTIONS:
+        choice = ask(f"  Pick 1-{len(options)}:")
+        if choice in options:
             break
-        print("  please pick one of 1-6")
-    type_, format_, description = _FIELD_TYPE_OPTIONS[choice]
+        print(f"  please pick one of 1-{len(options)}")
+    type_, format_, description = options[choice]
+    result = {"type": type_, "format": format_, "enum": None, "pattern": None, "minimum": None,
+              "maximum": None, "minLength": None, "maxLength": None}
+
     if description == "one of a fixed list of choices":
         raw = ask("  What are the allowed values? (comma-separated)")
-        enum = [v.strip() for v in raw.split(",") if v.strip()]
-        return type_, format_, enum
-    return type_, format_, None
+        result["enum"] = [v.strip() for v in raw.split(",") if v.strip()]
+    elif description == "text":
+        result["pattern"] = ask_text_pattern(label)
+        result["minLength"], result["maxLength"] = ask_text_length_bounds(label)
+    elif description in ("whole number", "decimal number"):
+        result["minimum"], result["maximum"] = ask_number_bounds(label)
+
+    return result
+
+
+def configure_nested_fields(builder: SchemaBuilder, parent_name: str, parent_label: str) -> None:
+    """'What fields does this group contain?' -- one level of nesting under an object-type
+    field. Confirmed as a real pattern (address/auditDetails-style groups) across three
+    independent real schemas found in the digitnxt org, not a hypothetical."""
+    print(f"  What fields does '{parent_label}' contain?")
+    while True:
+        sub_label = ask(f"  Name a field inside '{parent_label}' -- or leave blank if done:")
+        if not sub_label:
+            break
+        field_type = ask_field_type(sub_label, allow_group=False)
+        required = ask_yes_no(f"    Is '{sub_label}' required?")
+        description = ask(f"    One-line description for '{sub_label}' (optional):")
+        sub_name = builder.add_nested_field(
+            parent_name, sub_label, field_type["type"], required=required, format=field_type["format"],
+            enum=field_type["enum"], description=description or None, pattern=field_type["pattern"],
+            minimum=field_type["minimum"], maximum=field_type["maximum"],
+            minLength=field_type["minLength"], maxLength=field_type["maxLength"])
+        print(f"    -> added '{sub_name}' inside '{parent_label}'")
 
 
 def ask_field(builder: SchemaBuilder) -> str | None:
@@ -74,12 +159,17 @@ def ask_field(builder: SchemaBuilder) -> str | None:
     label = ask("Name this field (e.g. 'License Number') -- or leave blank if you're done adding fields:")
     if not label:
         return None
-    type_, format_, enum = ask_field_type(label)
+    field_type = ask_field_type(label)
     required = ask_yes_no(f"  Is '{label}' required on every record?")
     description = ask(f"  One-line description for '{label}' (optional):")
-    name = builder.add_field(label, type_, required=required, format=format_, enum=enum,
-                              description=description or None)
+    name = builder.add_field(label, field_type["type"], required=required, format=field_type["format"],
+                              enum=field_type["enum"], description=description or None,
+                              pattern=field_type["pattern"], minimum=field_type["minimum"],
+                              maximum=field_type["maximum"], minLength=field_type["minLength"],
+                              maxLength=field_type["maxLength"])
     print(f"  -> added field '{name}'")
+    if field_type["type"] == "object":
+        configure_nested_fields(builder, name, label)
     return name
 
 
@@ -114,19 +204,24 @@ def configure_constraints(builder: SchemaBuilder) -> None:
 
 
 def redo_field(builder: SchemaBuilder, name: str) -> None:
-    """Wipes one field's type/required/description and re-asks -- the targeted fix, so a wrong
-    type doesn't force restarting the whole schema."""
+    """Wipes one field's type/required/description (and, if it's a group, every sub-field) and
+    re-asks -- the targeted fix, so a wrong type doesn't force restarting the whole schema."""
     label = name
-    type_, format_, enum = ask_field_type(label)
+    field_type = ask_field_type(label)
     required = ask_yes_no(f"  Is '{label}' required on every record?")
     description = ask(f"  One-line description for '{label}' (optional):")
     was_required = name in builder.required
     builder.properties[name] = builder.properties[name].__class__(
-        type=type_, format=format_, enum=enum, description=description or None)
+        type=field_type["type"], format=field_type["format"], enum=field_type["enum"],
+        description=description or None, pattern=field_type["pattern"],
+        minimum=field_type["minimum"], maximum=field_type["maximum"],
+        minLength=field_type["minLength"], maxLength=field_type["maxLength"])
     if required and not was_required:
         builder.required.append(name)
     elif not required and was_required:
         builder.required.remove(name)
+    if field_type["type"] == "object":
+        configure_nested_fields(builder, name, label)
 
 
 def offer_fix_schema(builder: SchemaBuilder) -> None:

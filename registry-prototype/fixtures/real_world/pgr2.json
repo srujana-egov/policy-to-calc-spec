@@ -1,0 +1,171 @@
+{
+  "schemaCode": "pgr2",
+  "definition": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "serviceRequestId": {
+        "type": "string",
+        "description": "Unique identifier for the service request"
+      },
+      "tenantId": {
+        "type": "string",
+        "description": "Tenant identifier"
+      },
+      "serviceCode": {
+        "type": "string",
+        "description": "Code identifying the type of service"
+      },
+      "description": {
+        "type": "string",
+        "description": "Description of the service request"
+      },
+      "accountId": {
+        "type": "string",
+        "description": "Account identifier of the requester"
+      },
+      "source": {
+        "type": "string",
+        "description": "Source of the service request"
+      },
+      "applicationStatus": {
+        "type": "string",
+        "description": "Current status of the application"
+      },
+      "action": {
+        "type": "string",
+        "description": "Action to be performed"
+      },
+      "fileStoreId": {
+        "type": "string",
+        "description": "File store identifier for attachments"
+      },
+      "boundaryCode": {
+        "type": "string",
+        "description": "Boundary/ward code where service is requested"
+      },
+      "individualId": {
+        "type": "string",
+        "description": "Individual identifier of the requester"
+      },
+      "email": {
+        "type": "string",
+        "format": "email",
+        "description": "Email address of the requester"
+      },
+      "mobile": {
+        "type": "string",
+        "pattern": "^[0-9]{10}$",
+        "description": "Mobile number of the requester"
+      },
+      "processId": {
+        "type": "string",
+        "description": "Process identifier for workflow"
+      },
+      "workflowInstanceId": {
+        "type": "string",
+        "description": "Workflow instance identifier"
+      },
+      "auditDetails": {
+        "type": "object",
+        "description": "Audit information for the record",
+        "properties": {
+          "createdBy": {
+            "type": "string"
+          },
+          "createdTime": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "lastModifiedBy": {
+            "type": "string"
+          },
+          "lastModifiedTime": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "address": {
+        "type": "object",
+        "description": "Address information for the service request",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "serviceRequestId": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "pincode": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$"
+          },
+          "latitude": {
+            "type": "number",
+            "format": "double",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "longitude": {
+            "type": "number",
+            "format": "double",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "auditDetails": {
+            "type": "object",
+            "properties": {
+              "createdBy": {
+                "type": "string"
+              },
+              "createdTime": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "lastModifiedBy": {
+                "type": "string"
+              },
+              "lastModifiedTime": {
+                "type": "integer",
+                "format": "int64"
+              }
+            }
+          }
+        }
+      }
+    },
+    "required": [
+      "serviceRequestId",
+      "tenantId"
+    ]
+  },
+  "_comment_x_indexes_moved": "The original docs/tutorials/backend/pgr2-registry-schema.yaml nests x-indexes inside 'definition', same misplacement bug already found and fixed elsewhere in this project (see models.py/README.md) -- x-indexes is a top-level field on the real create-schema request, not part of the JSON Schema definition itself. Moved here to the verified-correct shape rather than reproducing the tutorial's own bug.",
+  "x-indexes": [
+    {
+      "name": "idx_pgr2_service_request_id",
+      "fieldPath": "serviceRequestId",
+      "method": "btree"
+    },
+    {
+      "name": "idx_pgr2_tenant_id",
+      "fieldPath": "tenantId",
+      "method": "btree"
+    },
+    {
+      "name": "idx_pgr2_application_status",
+      "fieldPath": "applicationStatus",
+      "method": "btree"
+    },
+    {
+      "fieldPath": "boundaryCode",
+      "method": "gin"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "schemaCode": "PGR.ServiceCategory",
+  "version": 1,
+  "isActive": true,
+  "definition": {
+    "type": "object",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "required": [
+      "code",
+      "name"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "code": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "active": {
+        "type": "boolean"
+      }
+    }
+  }
+}
