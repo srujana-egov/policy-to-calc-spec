@@ -1,0 +1,46 @@
+{
+  "schemaCode": "license-registry",
+  "definition": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "licenseNumber": {
+        "type": "string",
+        "description": "Unique license identifier"
+      },
+      "holderName": {
+        "type": "string"
+      },
+      "issueDate": {
+        "type": "string",
+        "format": "date"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "SUSPENDED",
+          "REVOKED"
+        ]
+      }
+    },
+    "required": [
+      "licenseNumber",
+      "holderName",
+      "issueDate",
+      "status"
+    ],
+    "x-unique": [
+      [
+        "licenseNumber"
+      ]
+    ],
+    "x-indexes": [
+      {
+        "fieldPath": "status",
+        "method": "btree"
+      }
+    ]
+  }
+}

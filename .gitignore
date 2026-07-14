@@ -4,3 +4,4 @@ __pycache__/
 .env
 *.env
 workflow-prototype/*_preview.html
+registry-prototype/*_preview.html

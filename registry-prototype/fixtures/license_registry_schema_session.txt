@@ -1,0 +1,26 @@
+license-registry
+License Number
+1
+yes
+Unique license identifier
+Holder Name
+1
+yes
+
+Issue Date
+5
+yes
+
+Status
+6
+ACTIVE, SUSPENDED, REVOKED
+yes
+
+
+yes
+licenseNumber
+no
+yes
+status
+no
+yes
