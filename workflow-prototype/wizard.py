@@ -6,6 +6,8 @@ of the whole process is ever asked for; every question is scoped to one state at
 Run: python wizard.py
 """
 
+from __future__ import annotations
+
 from builder import WorkflowBuilder
 from validate import validate_process_definition
 
