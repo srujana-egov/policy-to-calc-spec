@@ -15,11 +15,15 @@ wizard -- this prototype covers property/constraint/index authoring and record e
 cross-schema linking or webhook wiring.
 """
 
-from __future__ import annotations
-
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# Deliberately Optional[X], not X | None: Pydantic re-evaluates model field annotations at class
+# creation time to build its validators, so the `|` union syntax (PEP 604, Python 3.10+) breaks
+# on Python 3.9 even with `from __future__ import annotations` -- that only defers *function*
+# signature evaluation, not Pydantic's own field-type resolution. Matches the same fix already
+# applied in ../workflow-prototype/models.py.
 
 PropertyType = Literal["string", "integer", "number", "boolean", "array", "object"]
 IndexMethod = Literal["btree", "gin"]
@@ -27,13 +31,13 @@ IndexMethod = Literal["btree", "gin"]
 
 class PropertyDef(BaseModel):
     type: PropertyType
-    format: str | None = None
-    enum: list[str] | None = None
-    description: str | None = None
+    format: Optional[str] = None
+    enum: Optional[list[str]] = None
+    description: Optional[str] = None
 
 
 class IndexDef(BaseModel):
-    name: str | None = None
+    name: Optional[str] = None
     fieldPath: str
     method: IndexMethod = "btree"
 
@@ -46,8 +50,8 @@ class SchemaDefinition(BaseModel):
     additionalProperties: bool = False
     properties: dict[str, PropertyDef] = Field(default_factory=dict)
     required: list[str] = Field(default_factory=list)
-    x_unique: list[list[str]] | None = Field(default=None, alias="x-unique")
-    x_indexes: list[IndexDef] | None = Field(default=None, alias="x-indexes")
+    x_unique: Optional[list[list[str]]] = Field(default=None, alias="x-unique")
+    x_indexes: Optional[list[IndexDef]] = Field(default=None, alias="x-indexes")
 
 
 class SchemaRequest(BaseModel):
@@ -56,5 +60,5 @@ class SchemaRequest(BaseModel):
 
 
 class DataRequest(BaseModel):
-    version: int | None = None  # required only when updating an existing record, not on create
+    version: Optional[int] = None  # required only when updating an existing record, not on create
     data: dict[str, Any]

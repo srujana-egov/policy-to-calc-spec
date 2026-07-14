@@ -103,7 +103,10 @@ def configure_constraints(builder: SchemaBuilder) -> None:
         while True:
             field = ask(f"  Which field? ({', '.join(builder.properties.keys())})")
             if field in builder.properties:
-                builder.add_index(field)
+                gin = ask_yes_no(f"  Should '{field}' support full-text/contains search (gin), "
+                                  "rather than just exact-match/sorting (btree)?")
+                index_name = ask("  Give this index a name? (optional, blank for auto):")
+                builder.add_index(field, method="gin" if gin else "btree", name=index_name or None)
             else:
                 print(f"  '{field}' isn't a known field -- skipping")
             if not ask_yes_no("  Index another field?"):
