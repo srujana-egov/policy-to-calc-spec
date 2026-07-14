@@ -1,7 +1,7 @@
-"""Deterministic validator for a CalculationRuleSet -- no AI, adapted from
-../prototype/validate.py (this project's earlier, already-proven implementation of the same
-x-businessRules), kept as an independent copy rather than a cross-directory import, matching how
-workflow-prototype/registry-prototype don't import from each other either.
+"""Deterministic validator for a CalculationRuleSet -- no AI, adapted from an earlier, already-
+proven implementation of the same x-businessRules (from the sibling PolicyRule-extraction
+pipeline this project also built), kept as an independent copy rather than a cross-directory
+import, matching how workflow-prototype/registry-prototype don't import from each other either.
 
 Validates a whole rule *set* at once (not one rule in isolation) because several checks are
 cross-rule: attribute-path registration conflicts, dependsOn cycles, subEntityPath consistency

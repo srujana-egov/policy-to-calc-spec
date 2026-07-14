@@ -1,9 +1,10 @@
 """Deterministic arithmetic-expression -> JSON Logic parser for FORMULA rules.
 
-The original ../prototype/synthesize.py deliberately left FORMULA/TIME_BASED unimplemented,
-calling formalizing a free-text `formulaHint` into real JSON Logic "the one non-deterministic
-gap" -- because that hint came from *inferring* math out of messy prose, which is genuinely
-ambiguous. This wizard's FORMULA question is different in kind, not just degree: the user is
+The sibling PolicyRule-extraction pipeline this project also built deliberately left
+FORMULA/TIME_BASED unimplemented, calling formalizing a free-text `formulaHint` into real JSON
+Logic "the one non-deterministic gap" -- because that hint came from *inferring* math out of messy
+prose, which is genuinely ambiguous. This wizard's FORMULA question is different in kind, not just
+degree: the user is
 typing an arithmetic expression over variable names *they just declared moments ago* in this same
 session (e.g. "200 + 15 * size" where "size" is a formulaVariables entry already bound to a real
 registry field). That's a constrained, checkable task -- parse it, don't infer it -- so unlike

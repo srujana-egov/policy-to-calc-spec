@@ -1,6 +1,7 @@
 """Offline evaluator reimplementing the Calculation Engine's documented evaluation order,
-adapted from ../prototype/simulate.py (kept as an independent copy rather than a cross-directory
-import, matching how the three sibling prototypes don't import from each other).
+adapted from an earlier evaluator in the sibling PolicyRule-extraction pipeline this project also
+built (kept as an independent copy rather than a cross-directory import, matching how the three
+sibling prototypes don't import from each other).
 
 From fixtures/real_world/calculation-engine-3.0.0.yaml's /{module}/estimate description --
 confirmed against the real spec (see models.py's docstring), word for word the same order this
@@ -242,11 +243,10 @@ def simulate_estimate(rules: list[dict], entity_detail: dict) -> dict:
         else:
             raise ValueError(f"unsupported aggregateFunction: {func}")
         # Keyed by the AGGREGATION rule's own *component* name, not targetAttribute -- a
-        # derivedFrom condition names the aggregation component (per
-        # ../reference/calculation-rule-vocabulary.md: "derivedFrom: <aggregationComponent>"),
-        # not the arbitrary attribute name the total gets stored under. The original
-        # ../prototype/simulate.py keyed this by targetAttribute and looked it up by the
-        # condition's own dict key (attr_name) -- correct only by coincidence, if someone
+        # derivedFrom condition names the aggregation component ("derivedFrom:
+        # <aggregationComponent>"), not the arbitrary attribute name the total gets stored under.
+        # An earlier version of this evaluator keyed this by targetAttribute and looked it up by
+        # the condition's own dict key (attr_name) -- correct only by coincidence, if someone
         # happened to name their condition identically to the aggregation's targetAttribute.
         # Fixed here to match what derivedFrom actually names.
         derived[rule["component"]] = result

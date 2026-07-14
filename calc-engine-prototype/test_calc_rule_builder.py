@@ -1,8 +1,7 @@
 """Tests: CalculationRuleBuilder + validate_rule_set, mirroring
 ../workflow-prototype/test_workflow_builder.py and ../registry-prototype/test_schema_builder.py's
 role -- a real example (the actual Chennai Schedule I fixture, already proven in
-../prototype/fixtures_generated/) built entirely through builder calls, plus one test per
-completeness check.
+fixtures/real_world/) built entirely through builder calls, plus one test per completeness check.
 """
 
 import json
@@ -39,10 +38,9 @@ def canonical_rules(rule_set) -> list[dict]:
 
 
 def build_chennai_schedule_i() -> CalculationRuleBuilder:
-    """The real fixture from ../prototype/fixtures_generated/chennai_schedule_I_rules.json,
-    reproduced entirely through builder calls -- FLAT_OR_BANDED mechanism, two variants sharing
-    one component (one RATE_MATRIX/FLAT rule per variant, per ../prototype/synthesize.py's own
-    mapping)."""
+    """The real fixture from fixtures/real_world/chennai_schedule_I_rules.json, reproduced
+    entirely through builder calls -- FLAT_OR_BANDED mechanism, two variants sharing one component
+    (one RATE_MATRIX/FLAT rule per variant)."""
     b = CalculationRuleBuilder("trade-license")
     b.add_flat_rule(
         "MICRO_COTTAGE_LICENSE_FEE", 2000,
@@ -70,10 +68,10 @@ def test_02_all_eight_mechanisms_build_and_validate_clean():
     b.add_flat_rule("FLAT_FEE", 100, effectiveFrom="2024-01-01")
     b.add_per_unit_rule("PER_SQFT_FEE", 5, "$.area", effectiveFrom="2024-01-01")
     # "quantity"/"area" below are relative to one item in the list (simulate.py resolves them
-    # against each sub-entity dict directly, per the vocabulary reference's "relative to one
-    # array element") -- not '$.accessories[*].quantity', a root-absolute path that would
-    # silently fail to resolve. Real bug found and fixed while wiring up worked-example
-    # simulation -- see wizard.py's configure_aggregation()/configure_per_item().
+    # against each sub-entity dict directly, "relative to one array element") -- not
+    # '$.accessories[*].quantity', a root-absolute path that would silently fail to resolve. Real
+    # bug found and fixed while wiring up worked-example simulation -- see wizard.py's
+    # configure_aggregation()/configure_per_item().
     b.add_per_item_rule("PER_ACCESSORY_FEE", 50, "$.accessories[*]", "quantity",
                          effectiveFrom="2024-01-01")
     b.add_slab_rule("TIERED_FEE", "$.income",
@@ -176,11 +174,10 @@ def test_13_condition_equals_and_range_together_caught():
 
 
 def test_14_condition_missing_jsonpath_and_derivedfrom_caught():
-    """A real gap found while adapting ../prototype/validate.py: its own per-condition check
-    only ever required 'jsonPath', with no exception for 'derivedFrom' -- even though the model,
-    _validate_attribute_path_registry, and ../reference/calculation-rule-vocabulary.md all treat
-    derivedFrom as a real, valid alternative (banding on a previous AGGREGATION's result). Fixed
-    here to require either."""
+    """A real gap found while adapting an earlier validator: its own per-condition check
+    only ever required 'jsonPath', with no exception for 'derivedFrom' -- even though the model
+    and _validate_attribute_path_registry both treat derivedFrom as a real, valid alternative
+    (banding on a previous AGGREGATION's result). Fixed here to require either."""
     rule = {"ruleType": "RATE_MATRIX", "component": "X", "scope": "ENTITY", "calculationType": "FLAT",
             "value": 1, "conditions": {"a": {}}, "effectiveFrom": "2024-01-01"}
     errors = validate_rule_set([rule])

@@ -6,13 +6,10 @@ schedule from scratch, not extracting one from an existing policy document. Same
 interactive CLI and automated tests, a deterministic validate step, a table preview a non-technical
 user can actually read, an explicit confirmation gate, and a real-or-dry-run write.
 
-This is a *third*, complementary path alongside `../prototype/`'s existing
-`PolicyRule[] -> CalculationRule[]` pipeline (built for the backlog of already-written policy
-documents). That pipeline keeps `PolicyRule` as an intermediate for reasons specific to *that*
-problem: raw `CalculationRule` isn't reviewable by a business user, and decoupling the
-extraction form from `CalculationRule`'s own schema volatility means a spec change updates one
-mapper, not nine form screens. This prototype has no such intermediate, because there's no
-existing document to extract from — the wizard's own questions are the source of truth, exactly
+Unlike an *extraction* pipeline (reading an already-written policy document and inferring rules
+from it, which needs a `PolicyRule[]` intermediate stage precisely because those fields start out
+as inferred guesses), this prototype has no such intermediate at all — there's no existing
+document to extract from, so the wizard's own questions are the source of truth directly, exactly
 like the other two prototypes.
 
 ## Spec found and verified
@@ -24,12 +21,12 @@ real spec is now checked into `fixtures/real_world/calculation-engine-3.0.0.yaml
 **The honest history here is more interesting than "never found," and worth correcting rather than
 repeating:** this exact file already existed locally (in `~/Downloads`, dated 2026-07-10 —
 *before* this project's first commit) and was already used once, early on. `../DEMO-2026-07-13.md` (this
-project's own earlier design doc) documents reading it "line by line" and states plainly that
-`../prototype/validate.py` — the direct ancestor of this prototype's own `validate.py` — "was
-written from [it], line by line." So the business rules this prototype inherited were never purely
-invented; they trace back to a real spec that was read once, carefully, days before this specific
-prototype existed. What actually happened is narrower and more mundane than "no such service could
-be found": later verification work (this prototype, `../registry-prototype/`,
+project's own earlier design doc) documents reading it "line by line" and states plainly that the
+validator this prototype's own `validate.py` was adapted from "was written from [it], line by
+line." So the business rules this prototype inherited were never purely invented; they trace back
+to a real spec that was read once, carefully, days before this specific prototype existed. What
+actually happened is narrower and more mundane than "no such service could be found": later
+verification work (this prototype, `../registry-prototype/`,
 `../workflow-prototype/`) searched the `digitnxt` GitHub org for a Calculation Engine service and
 found nothing there — true, since this is a local file, not something in that org's repos — and
 that search result got summarized, inaccurately, as "no such spec exists anywhere," rather than
@@ -126,13 +123,13 @@ prototype's own nesting limit), and lets the wizard's questions *pick* a field, 
 exact `$.path` deterministically (`field_to_json_path()`).
 
 This isn't a new convention invented for this prototype — `$.`-prefixed paths already appear
-throughout this project's earlier work: `../prototype/simulate.py`'s own docstring
-(`"$.tradeLicenseDetail.premisesArea"`), `../DEMO-2026-07-13.md`, and the real
-`../prototype/fixtures_generated/chennai_schedule_I_rules.json` fixture. If the fetch fails (no
+throughout this project's earlier work: `../DEMO-2026-07-13.md`
+(`"$.tradeLicenseDetail.premisesArea"`) and the real
+`fixtures/real_world/chennai_schedule_I_rules.json` fixture. If the fetch fails (no
 server configured, network error, unknown schema code), the wizard falls back to manual path entry
 rather than crashing the session — confirmed by `test_wiz_11` in `test_wizard.py`.
 
-## The mechanism menu (`../reference/calculation-rule-vocabulary.md`, made interactive)
+## The mechanism menu, made interactive
 
 | Wizard option | `CalculationRule` shape | Builder method |
 |---|---|---|
@@ -147,8 +144,8 @@ rather than crashing the session — confirmed by `test_wiz_11` in `test_wizard.
 
 A real bug found while wiring up AGGREGATION, twice over: this prototype's first draft set
 `calculationType: FORMULA` for aggregation rules, invented rather than checked. That was then
-"fixed" to `calculationType: FLAT, value: 0` — an inert placeholder, matching
-`../prototype/synthesize.py`'s own (unverified) convention. `calculation-rule-examples.pdf`'s real
+"fixed" to `calculationType: FLAT, value: 0` — an inert placeholder, following an earlier,
+unverified convention. `calculation-rule-examples.pdf`'s real
 examples #22–24 later showed neither is right: the real engine omits `calculationType`/`value`
 entirely for AGGREGATION (it derives an attribute, it doesn't compute a billable amount). `models.py`
 now makes `calculationType` optional; `add_aggregation_rule` sets neither field.
@@ -160,8 +157,7 @@ worked examples," not just the generated rules — a rule table still requires
 someone to mentally simulate the rules to know whether they're right. The confirmation preview now
 does this for real: `example_generator.py` picks up to 15 scenarios, each *targeted* at one
 specific decision the wizard's answers made (a condition boundary, a slab tier, an aggregation
-threshold) — not random values — and `simulate.py` (adapted from the already-proven
-`../prototype/simulate.py`) actually computes each one's result.
+threshold) — not random values — and `simulate.py` actually computes each one's result.
 
 This is the concrete version of "oh, so at exactly 1000 sq ft this shop pays 2000, but at 1000.01
 it jumps to 5000 — did I mean to draw the line there?" — seeing a real number expose a boundary
@@ -173,16 +169,16 @@ because none of them are structural:
 
 - **Sub-entity paths need to be *relative*, not root-`$.`-prefixed.** `AGGREGATION`'s
   `sourceAttribute` and `PER_ITEM_IN_LIST`'s `appliesOn`/conditions all apply *inside* one element
-  of a repeating list — the vocabulary reference's own words: "relative to one array element." The
+  of a repeating list — relative to one array element, not the document root. The
   wizard's first draft ran every field through the same `$.`-prefixing picker regardless, which
   silently failed to resolve during simulation (an aggregation's sum came back as `0` every time).
   `ask_field_reference()` now takes a `relative` flag; `configure_per_item()`/
   `configure_aggregation()` use it.
 - **A `derivedFrom` condition names an aggregation's *component*, not its `targetAttribute`.**
-  `../prototype/simulate.py`'s own `derived` dict was keyed by `targetAttribute` but looked up by
+  An earlier evaluator's `derived` dict was keyed by `targetAttribute` but looked up by
   the condition's own (arbitrary) dict key — correct only if someone happened to name their
   condition identically to the aggregation's result name. Fixed to key by `component`, matching
-  what `derivedFrom` (per the vocabulary reference: `derivedFrom: <aggregationComponent>`) and this
+  what `derivedFrom` (`derivedFrom: <aggregationComponent>`) and this
   prototype's own wizard actually store there.
 - **A FORMULA variable reading an AGGREGATION's result via `componentRef` crashed.** AGGREGATION
   rules never produce a real line-item amount (their `calculationType`/`value` are an inert
@@ -207,7 +203,7 @@ mistake worked-example simulation exists to catch, including in the tool that ge
 `calculation-rule-examples.pdf` — 30 real `CalculationRule` bodies, ordered simple-to-complex, each
 introducing one new concept — surfaced partway through this project, *before* the real OpenAPI spec
 above was found. At the time, it was the only real ground truth available for a model otherwise
-inherited from `../prototype/`'s own reconstruction and never independently checked; treated as
+inherited from an earlier, never independently checked reconstruction; treated as
 ground truth in its own right, its worked arithmetic (e.g. "700,000 pays 0.5% on the first 500,000
 and 1% on the remaining 200,000") was checked directly against what `simulate.py` computes, not
 just structural shape.
@@ -228,7 +224,7 @@ It also confirmed several design decisions already made without real evidence at
 FORMULA parser's deliberate exclusion of `if`/comparison operators (the doc's own "Common mistakes"
 section recommends two plain conditional rules over a hidden branch, exactly this prototype's
 stance) — though `simulate.py`'s `_eval_formula` now *evaluates* `if`/`==`/`!=`/comparisons anyway
-(restored from `../prototype/simulate.py`, dropped during adaptation), since example #28 shows the
+(restored from an earlier evaluator, dropped during adaptation), since example #28 shows the
 real engine accepts this even if this wizard won't help someone author it. Also confirmed: CGST/SGST
 "identical twin" tax pairs, `dependsOn` required purely for sequencing even on a `FLAT` `TAX` rule
 with nothing to read (`CANCER_CESS`), and a 3-deep `PROPERTY_TAX -> INTEREST -> PENALTY` dependency
@@ -237,7 +233,8 @@ prototype's model/validator/builder already handled correctly, no changes needed
 
 ## The FORMULA question: deterministic, not an LLM call
 
-`../prototype/synthesize.py` deliberately left `FORMULA`/`TIME_BASED` unimplemented — formalizing a
+The sibling PolicyRule-extraction pipeline this project also built deliberately left
+`FORMULA`/`TIME_BASED` unimplemented — formalizing a
 free-text `formulaHint` into JSON Logic was "the one non-deterministic gap," because that hint came
 from *inferring* math out of messy prose. This wizard's version is different in kind, not just
 degree: the user types an arithmetic expression (`"200 + 15 * size"`) over variable names *they
@@ -250,7 +247,7 @@ with a message safe to show a non-technical user, rather than silently guessing.
 ## Files
 
 - `models.py` — `CalculationRule`/`Slab`/`AttributeCondition`/`AttributeBinding`/
-  `CalculationRuleSet`, inherited from `../prototype/models.py` (see the caveat above).
+  `CalculationRuleSet` (see "Spec found and verified" above for its verification history).
   `Union[int, float]` on every numeric field, not bare `float` — preserves e.g. the real Chennai
   fixture's `"to": 1000` rather than coercing to `1000.0` (the same fix already needed once in
   `../registry-prototype/models.py`).
@@ -260,18 +257,18 @@ with a message safe to show a non-technical user, rather than silently guessing.
 - `builder.py` — `CalculationRuleBuilder`, one method per mechanism shape (not one generic
   `add_field`-style method — `CalculationRule`'s shape varies too much by `calculationType` for
   that to make sense, the same reasoning `WorkflowBuilder.add_action_to_new_state` already used).
-- `validate.py` — adapted from `../prototype/validate.py`'s already-proven business-rule checks
+- `validate.py` — adapted from an earlier, already-proven implementation's business-rule checks
   (attribute-path registry conflicts, `dependsOn` DAG, overlapping bands, `AttributeBinding` shape,
   SLAB tier validation, FORMULA variable-reference checks). Found and fixed one real gap while
   adapting: the per-condition check required `jsonPath` unconditionally, with no exception for
-  `derivedFrom` even though the model and vocabulary reference both treat it as a real, valid
+  `derivedFrom` even though the model treats it as a real, valid
   alternative — `test_14`/`test_15` in `test_calc_rule_builder.py` cover this.
 - `render.py` — a self-contained HTML table preview (one row per rule, not a JSON dump) plus a
   "Worked examples" section when scenario results are passed in, zero external dependencies. Click
   a rule row for its exact definition.
 - `simulate.py` — offline evaluator reimplementing the engine's documented evaluation order
   (AGGREGATION first, then RATE_MATRIX, ADJUSTMENT, then PENALTY/INTEREST/TAX in `dependsOn`
-  order), adapted from `../prototype/simulate.py`. Several real bugs found and fixed here — see
+  order), adapted from an earlier evaluator. Several real bugs found and fixed here — see
   "Worked examples in the preview" and "Stress test against 30 real examples" above.
 - `example_generator.py` — picks up to 15 targeted worked-example scenarios (one per condition
   band/boundary, slab tier, aggregation threshold) and runs them through `simulate.py`.
@@ -279,7 +276,7 @@ with a message safe to show a non-technical user, rather than silently guessing.
   with worked examples → confirm → write. `run_session()` returns the built rule set, separate
   from the write step, so tests can drive it directly.
 - `test_calc_rule_builder.py` — the real Chennai Schedule I fixture (already proven in
-  `../prototype/fixtures_generated/`), reproduced exactly through builder calls, plus one test per
+  `fixtures/real_world/`), reproduced exactly through builder calls, plus one test per
   completeness check.
 - `test_formula_parser.py` — every supported operator, precedence, and every rejection path.
 - `test_example_generator.py` — confirms scenarios are genuinely targeted (not random) and that
@@ -300,7 +297,7 @@ with a message safe to show a non-technical user, rather than silently guessing.
   real examples" above).
 - `fixtures/` — `flat_percentage_session.txt`/`slab_aggregation_formula_session.txt` (exact wizard
   answers covering all 8 mechanisms across two sessions), `*_golden.json` (verified output),
-  `real_world/chennai_schedule_I_rules.json` (copied from `../prototype/fixtures_generated/`),
+  `real_world/chennai_schedule_I_rules.json` (the real Chennai Schedule I fixture),
   `real_world/calculation_rule_examples.json` (all 30 examples from the PDF, transcribed verbatim),
   `real_world/calculation-engine-3.0.0.yaml` (the real OpenAPI spec, confirmed from the platform
   team).
@@ -313,11 +310,11 @@ with a message safe to show a non-technical user, rather than silently guessing.
   `/cancel`, and calculation-record search — none of those are implemented here; this prototype
   only covers rule *authoring* (`POST /{module}/rules`), not the full calculation lifecycle.
 - `TIME_BASED` (interest/penalty reading day-count fields like `daysDelayed`) isn't a separate
-  wizard option — per `../reference/calculation-rule-vocabulary.md`'s own note, the engine expects
-  the caller to supply day-count fields directly; this prototype doesn't do date arithmetic.
+  wizard option — the engine expects the caller to supply day-count fields directly, per the real
+  spec's own INTEREST/PENALTY examples; this prototype doesn't do date arithmetic.
 - The FORMULA *authoring* parser (`formula_parser.py`, what the wizard uses) supports `+`/`-`/`*`/`/`
-  and parentheses only — no conditionals (`if`), no functions. Per the vocabulary reference (and
-  `calculation-rule-examples.pdf`'s own "Common mistakes to avoid"), "a hidden if-branch formula" is
+  and parentheses only — no conditionals (`if`), no functions. Per
+  `calculation-rule-examples.pdf`'s own "Common mistakes to avoid", "a hidden if-branch formula" is
   discouraged in favor of two plain conditional rules anyway, so this isn't a gap so much as a
   deliberate nudge toward the clearer pattern. `simulate.py`'s *evaluator* is not this limited,
   though — it does support `if`/`==`/`!=`/comparisons, since the real engine accepts a rule

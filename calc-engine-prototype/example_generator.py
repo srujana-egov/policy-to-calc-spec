@@ -7,9 +7,9 @@ worked examples" half, previously not wired in (render.py only showed the rule t
 someone notice "wait, a 1000 sq ft shop pays 2000 but 1000.01 sq ft pays 5000 -- did I mean to
 draw the line there?" instead of only reading rule definitions and mentally simulating them.
 
-Reuses simulate.py (adapted from ../prototype/simulate.py) to actually compute each scenario's
-result, not just display the input -- a wrong boundary decision shows up as a visibly wrong
-number, not just an ambiguous-looking condition.
+Reuses simulate.py to actually compute each scenario's result, not just display the input -- a
+wrong boundary decision shows up as a visibly wrong number, not just an ambiguous-looking
+condition.
 """
 
 from __future__ import annotations

@@ -112,10 +112,9 @@ def ask_field_reference(purpose: str, registry_fields: list[str] | None, relativ
 
     relative=True returns a bare, root-unprefixed path (e.g. 'quantity', not '$.quantity') --
     required for anything *inside* a SUBENTITY-scoped rule (a per-item rate's appliesOn, an
-    AGGREGATION's sourceAttribute, or a condition on either): the vocabulary reference states
-    these become "relative to one array element", and simulate.py's resolve_relative_path()
-    doesn't strip a '$.' prefix itself -- a real bug this project found and fixed once already,
-    see configure_aggregation()'s comment."""
+    AGGREGATION's sourceAttribute, or a condition on either): these become "relative to one array
+    element", and simulate.py's resolve_relative_path() doesn't strip a '$.' prefix itself -- a
+    real bug this project found and fixed once already, see configure_aggregation()'s comment."""
     convert = field_to_relative_path if relative else field_to_json_path
     if registry_fields:
         print(f"  Which field {purpose}?")
@@ -401,10 +400,9 @@ def configure_aggregation(builder, registry_fields, aggregation_components):
     if not sub_entity_path.endswith("[*]"):
         sub_entity_path += "[*]"
     # Relative to one item in the list (e.g. 'area'), not root-absolute -- simulate.py resolves
-    # this against each sub-entity dict directly, per the vocabulary reference's "relative to one
-    # array element." A '$.'-prefixed or list-prefixed path here would silently fail to resolve
-    # (found and fixed while wiring up worked-example simulation -- see registry_lookup.py's
-    # field_to_relative_path() docstring).
+    # this against each sub-entity dict directly. A '$.'-prefixed or list-prefixed path here would
+    # silently fail to resolve (found and fixed while wiring up worked-example simulation -- see
+    # registry_lookup.py's field_to_relative_path() docstring).
     source = ask_field_reference("inside each item should be totaled (e.g. 'area')", registry_fields,
                                   relative=True)
     target_attribute = ask("  What should the result be called? (e.g. 'totalFloorArea')")

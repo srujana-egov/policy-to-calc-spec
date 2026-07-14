@@ -72,10 +72,10 @@ def list_schema_fields(schema_data: dict) -> list[str]:
 
 def field_to_json_path(field_path: str) -> str:
     """'address.city' -> '$.address.city' -- the `$.` convention already used throughout this
-    project's earlier CalculationRule work (../prototype/simulate.py, DEMO-2026-07-13.md,
-    fixtures_generated/chennai_schedule_I_rules.json's own '$.tradeLicenseDetail.premisesArea').
-    Idempotent: a path someone already typed with a '$.' prefix is returned unchanged, rather
-    than doubled into '$.$.foo'."""
+    project's earlier CalculationRule work (DEMO-2026-07-13.md, this prototype's own
+    fixtures/real_world/chennai_schedule_I_rules.json fixture's own
+    '$.tradeLicenseDetail.premisesArea'). Idempotent: a path someone already typed with a '$.'
+    prefix is returned unchanged, rather than doubled into '$.$.foo'."""
     field_path = field_path.strip()
     if field_path.startswith("$."):
         return field_path
@@ -84,9 +84,9 @@ def field_to_json_path(field_path: str) -> str:
 
 def field_to_relative_path(field_path: str) -> str:
     """'quantity' -> 'quantity' -- for a jsonPath *inside* a SUBENTITY-scoped rule (PER_ITEM_IN_LIST,
-    AGGREGATION's sourceAttribute, or a condition on such a rule), which the vocabulary reference
-    states becomes "relative to one array element", not root-absolute. Strips any '$.' prefix a
-    user might type out of habit -- ../simulate.py's resolve_relative_path() doesn't do this
+    AGGREGATION's sourceAttribute, or a condition on such a rule), which becomes "relative to one
+    array element", not root-absolute. Strips any '$.' prefix a
+    user might type out of habit -- simulate.py's resolve_relative_path() doesn't do this
     stripping itself, so a leftover '$.' here would silently fail to resolve against a
     sub-entity dict (a real bug this project found and fixed once already, see wizard.py's
     configure_aggregation())."""

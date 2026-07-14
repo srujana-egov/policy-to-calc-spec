@@ -6,7 +6,7 @@ Unlike WorkflowBuilder/SchemaBuilder (which mutate one growing object field-by-f
 CalculationRule's shape varies enough by calculationType that each method here takes a whole
 rule's worth of already-decided parameters at once (mirroring how
 WorkflowBuilder.add_action_to_new_state takes everything needed in one call, not many small
-mutations) -- one method per mechanism shape in ../reference/calculation-rule-vocabulary.md,
+mutations) -- one method per mechanism shape (the eight-mechanism menu documented in README.md),
 rather than one generic "add_field"-style method that would need type-specific branches anyway.
 """
 
@@ -123,14 +123,14 @@ class CalculationRuleBuilder:
                               priority: int = 1, effectiveFrom: str = "",
                               effectiveTo: str | None = None) -> CalculationRule:
         """'Total up a list into one number' -- scope=SUBENTITY forced, low priority by default
-        (AGGREGATION always runs before whatever depends on its result, regardless of priority,
-        per the vocabulary reference -- the low default here is just a readability convention).
+        (AGGREGATION always runs before whatever depends on its result, regardless of priority --
+        the low default here is just a readability convention).
 
         No calculationType/value -- an AGGREGATION rule derives an attribute, it doesn't compute
         a billable amount; aggregateFunction is what drives behavior. An earlier version of this
-        method set calculationType="FLAT", value=0 as an inert placeholder, following
-        ../prototype/synthesize.py's own (unverified) convention -- calculation-rule-examples.pdf's
-        real examples #22-24 confirm the real engine omits the field entirely for AGGREGATION."""
+        method set calculationType="FLAT", value=0 as an inert placeholder, following an earlier,
+        unverified convention -- calculation-rule-examples.pdf's real examples #22-24 confirm the
+        real engine omits the field entirely for AGGREGATION."""
         rule = CalculationRule(
             ruleType="AGGREGATION", component=component, scope="SUBENTITY",
             subEntityPath=sub_entity_path,

@@ -19,7 +19,7 @@ Two real, confirmed bugs found via this stress test, both fixed as part of build
     property tax). Fixed; wizard.py's rate question re-worded to match (it previously told users
     to pre-divide by 100 themselves, compensating for the missing division rather than fixing it).
   - AGGREGATION rules were assumed to require calculationType/value (an inert FLAT/0 placeholder,
-    inherited from ../prototype/synthesize.py's own unverified convention). Examples #22-24 show
+    inherited from an earlier, unverified convention). Examples #22-24 show
     the real engine omits both fields entirely for AGGREGATION. Fixed in models.py (calculationType
     now Optional), validate.py (only required for non-AGGREGATION ruleTypes), and builder.py
     (add_aggregation_rule no longer sets either field).
