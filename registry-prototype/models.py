@@ -61,6 +61,16 @@ IndexMethod = Literal["btree", "gin"]
 
 
 class PropertyDef(BaseModel):
+    # extra="forbid", not the default "ignore": a real bug found via add_raw_property -- a raw
+    # dict like {"type": "array", "prefixItems": [...]} has a "type" value that's a legal
+    # PropertyType, so Pydantic's Union[PropertyDef, dict] elsewhere in this file would otherwise
+    # happily validate it AS a PropertyDef and silently drop "prefixItems" (Pydantic's default
+    # is to ignore, not reject, unmodeled keys). With extra="forbid", any key PropertyDef doesn't
+    # explicitly model makes that Union member fail to validate, so Pydantic correctly falls
+    # through to the raw `dict` variant instead -- the fix has to live here, not in the Union
+    # field's ordering, since the union tries the "best match," not strictly left-to-right.
+    model_config = ConfigDict(extra="forbid")
+
     type: PropertyType
     format: Optional[str] = None
     enum: Optional[list[str]] = None
@@ -76,6 +86,12 @@ class PropertyDef(BaseModel):
     # One level of nesting only (see module docstring) -- meaningful only when type == "object".
     properties: Optional[dict[str, "PropertyDef"]] = None
     required: Optional[list[str]] = None
+    # "The value must NOT match this schema" -- e.g. {"not": {"pattern": "^-"}} on a string field
+    # means "anything except values starting with a dash." Raw dict, not further modeled: the
+    # negated schema could itself be arbitrarily complex, same reasoning as the properties escape
+    # hatch on SchemaDefinition below. Trailing underscore + alias, matching schema_/$schema --
+    # `not` is a Python keyword and can't be a field name directly.
+    not_: Optional[dict] = Field(default=None, alias="not")
 
 
 PropertyDef.model_rebuild()
@@ -88,17 +104,55 @@ class IndexDef(BaseModel):
 
 
 class SchemaDefinition(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    # extra="allow", not the default "ignore": no builder tool sets an unmodeled top-level
+    # keyword today, but if one ever does (a future "import an existing schema" path, a new LLM
+    # tool), the default "ignore" would silently drop it before it ever reaches the registry --
+    # exactly the failure mode this project's whole "preview gap" feature exists to prevent, just
+    # one layer lower (at ingestion, not at rendering). "allow" round-trips it byte-for-byte
+    # instead, same reasoning as the properties/allOf/etc. raw-dict escape hatches below.
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
 
     schema_: str = Field(default="https://json-schema.org/draft/2020-12/schema", alias="$schema")
     type: Literal["object"] = "object"
     additionalProperties: bool = False
-    properties: dict[str, PropertyDef] = Field(default_factory=dict)
+    # Union[PropertyDef, dict], not just PropertyDef: this is the escape hatch that makes "any
+    # possible JSON Schema" real rather than aspirational -- a property using a construct
+    # PropertyDef can't represent (oneOf/anyOf, no top-level "type") simply won't validate as a
+    # PropertyDef (whose "type" field is required), so Pydantic's union falls back to storing it
+    # as a raw dict, preserved byte-for-byte through to the real create-schema request.
+    properties: dict[str, Union[PropertyDef, dict]] = Field(default_factory=dict)
     required: list[str] = Field(default_factory=list)
+    # Conditional rules ("if applicantType is Individual, then aadhaarNumber is required"),
+    # stored as raw if/then dicts rather than modeled -- same reasoning as the properties escape
+    # hatch above. Left as None (not an eager []) so a schema with no conditionals round-trips
+    # with no "allOf" key at all, matching every real example seen so far.
+    allOf: Optional[list[dict]] = None
+    # {"fieldA": ["fieldB", "fieldC"]} -- "if fieldA is present at all, fieldB/fieldC become
+    # required." Simple enough to model directly rather than as a raw passthrough.
+    dependentRequired: Optional[dict[str, list[str]]] = None
+    # {"fieldA": {"properties": {...}, "required": [...]}} -- dependentRequired's more general
+    # cousin: presence of fieldA pulls in a whole extra sub-schema (new properties, not just new
+    # required entries), not just "these already-declared fields become required." Raw dict
+    # value, same escape-hatch reasoning as allOf.
+    dependentSchemas: Optional[dict[str, dict]] = None
+    # {pattern: schema} -- "any property whose *name* matches this regex must conform to this
+    # schema," for open-ended/dynamic fields a fixed properties list can't express (e.g. "any
+    # field starting with x- is a free-form string"). Raw dict values, same reasoning as allOf.
+    patternProperties: Optional[dict[str, dict]] = None
+    # Reusable sub-schema definitions, referenced from elsewhere in the same document via
+    # {"$ref": "#/$defs/name"} -- lets one sub-shape (e.g. "Address") be defined once and reused
+    # across multiple fields instead of duplicated. Only *internal* refs are resolved by this
+    # prototype (see render.py) -- an external/cross-document $ref stays out of scope, same
+    # reasoning as x-ref-schema above, and for the added reason that resolving one would require
+    # a network fetch, breaking this project's offline-safety guarantee.
+    defs_: Optional[dict[str, dict]] = Field(default=None, alias="$defs")
 
 
 class SchemaRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    # extra="allow", same reasoning as SchemaDefinition above -- x-ref-schema/webhook are real,
+    # deliberately out-of-scope fields (see module docstring); "allow" means if either ever shows
+    # up on a request this prototype didn't originate, it still round-trips instead of vanishing.
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
 
     schemaCode: str
     definition: SchemaDefinition

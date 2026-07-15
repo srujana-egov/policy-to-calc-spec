@@ -307,6 +307,89 @@ def test_wiz_12_add_delete_redo_record_via_offer_data_fix():
     check("wiz12-final-record-is-carol", records[0] == {"name": "Carol", "status": "A"}, records)
 
 
+# ---------------------------------------------------------------------------
+# resolve_required_gaps -- the targeted follow-up for an LLM draft's highest-value gap
+# ---------------------------------------------------------------------------
+
+def test_wiz_13_resolve_required_gaps_only_asks_about_unstated_fields():
+    """A field whose required-ness the user actually stated (required_stated=True) should get no
+    question at all -- only fields the model had to guess at get asked about. Question count
+    scales with what was left unsaid, not with how many fields exist."""
+    builder = SchemaBuilder("x")
+    builder.add_field("License Number", "string", required=True)   # stated: leave alone
+    builder.add_field("Notes", "string", required=False)           # not stated: will be asked
+    confidence = {
+        "licenseNumber": {"required_stated": True, "details_stated": True},
+        "notes": {"required_stated": False, "details_stated": True},
+    }
+    with canned_input(["yes"]) as queue:  # only one question should be asked
+        wizard.resolve_required_gaps(builder, confidence)
+    check("wiz13-only-one-question-asked", not queue, queue)
+    check("wiz13-unstated-field-updated", "notes" in builder.required, builder.required)
+    check("wiz13-stated-field-untouched", "licenseNumber" in builder.required, builder.required)
+
+
+def test_wiz_14_resolve_required_gaps_handles_nested_fields():
+    builder = SchemaBuilder("x")
+    address = builder.add_field("Address", "object", required=True)
+    builder.add_nested_field(address, "City", "string", required=False)
+    confidence = {
+        "address": {"required_stated": True, "details_stated": True},
+        "address.city": {"required_stated": False, "details_stated": True},
+    }
+    with canned_input(["yes"]) as queue:
+        wizard.resolve_required_gaps(builder, confidence)
+    check("wiz14-input-consumed", not queue, queue)
+    check("wiz14-nested-field-now-required", "city" in builder.properties["address"].required)
+
+
+def test_wiz_15_resolve_required_gaps_can_answer_no_and_leave_optional():
+    builder = SchemaBuilder("x")
+    builder.add_field("Notes", "string", required=False)
+    confidence = {"notes": {"required_stated": False, "details_stated": True}}
+    with canned_input(["no"]) as queue:
+        wizard.resolve_required_gaps(builder, confidence)
+    check("wiz15-input-consumed", not queue, queue)
+    check("wiz15-stays-optional", "notes" not in builder.required, builder.required)
+
+
+# ---------------------------------------------------------------------------
+# print_preview_completeness -- the CLI-side echo of the HTML completeness banner. Every other
+# test that exercises this code path (via in_scratch_cwd) redirects stdout to a StringIO that's
+# never read back, so the actual printed content was never asserted on.
+# ---------------------------------------------------------------------------
+
+def test_wiz_16_print_preview_completeness_reports_percent_and_gap_lines():
+    definition = {
+        "type": "object",
+        "properties": {
+            "a": {"type": "string"},
+            "documents": {"type": "array", "contains": {"properties": {"status": {"const": "APPROVED"}}},
+                          "minContains": 1},
+        },
+    }
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        wizard.print_preview_completeness(definition)
+    output = buf.getvalue()
+    check("wiz16-percent-line", "Preview completeness: 50%" in output, output)
+    check("wiz16-full-count", "1 fully visualized" in output, output)
+    check("wiz16-partial-count", "1 explained here" in output, output)
+    check("wiz16-needs-review-hint", "Needs review" in output, output)
+    check("wiz16-gap-keyword-listed", "contains + minContains" in output, output)
+    check("wiz16-gap-meaning-listed", "APPROVED" in output, output)
+
+
+def test_wiz_17_print_preview_completeness_omits_gap_section_when_fully_complete():
+    definition = {"type": "object", "properties": {"a": {"type": "string"}}}
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        wizard.print_preview_completeness(definition)
+    output = buf.getvalue()
+    check("wiz17-percent-line", "Preview completeness: 100%" in output, output)
+    check("wiz17-no-gap-section", "Needs review" not in output, output)
+
+
 if __name__ == "__main__":
     test_functions = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for fn in test_functions:

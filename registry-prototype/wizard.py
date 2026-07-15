@@ -16,8 +16,8 @@ import urllib.request
 
 from builder import SchemaBuilder
 from models import SchemaRequest
-from render import render_data_preview, render_schema_preview
-from validate import validate_schema_request
+from render import get_preview_completeness, render_data_preview, render_schema_form_preview
+from validate import validate_json_schema_syntax, validate_schema_request
 
 
 class Cancelled(Exception):
@@ -257,6 +257,128 @@ def offer_fix_schema(builder: SchemaBuilder) -> None:
         print(f"  '{choice}' isn't a known field -- nothing changed")
 
 
+def print_preview_completeness(definition: dict) -> None:
+    """Prints the same "how much of this schema can the preview actually show you" summary the
+    rendered HTML's completeness banner gives, in the terminal too -- so a CLI user sees it before
+    even opening the browser, and knows to look for "Needs review" panels if it's below 100%."""
+    completeness = get_preview_completeness(definition)
+    print(f"\nPreview completeness: {completeness['percent']}% "
+          f"({completeness['full']} fully visualized, {completeness['partial']} explained here "
+          f"(server still enforces it), {completeness['none']} not explained (server still enforces it))")
+    if completeness["gaps"]:
+        print("Some rules need your review in the preview (look for 'Needs review' panels):")
+        for gap in completeness["gaps"]:
+            print(f"  - {' + '.join(gap['keywords'])}: {gap['meaning']}")
+    cs = completeness.get("conformance_summary")
+    if cs and cs["executed"]:
+        print(f"Conformance checks: {cs['executed']} executed across {cs['gaps_with_tests']} rule(s), "
+              f"{cs['passed_as_expected']} behaved as expected"
+              + (f", {cs['errored']} could not be validated" if cs.get("errored") else "")
+              + (f", {cs['inconclusive']} inconclusive" if cs.get("inconclusive") else "")
+              + (f", {cs['surprising']} SURPRISING -- review these rules closely" if cs["surprising"] else "") + ".")
+
+
+def resolve_required_gaps(builder: SchemaBuilder, confidence: dict) -> None:
+    """Targeted follow-up for the single highest-value gap an LLM draft can leave: fields whose
+    required/optional status was inferred rather than actually stated by the user. Question count
+    scales with how much was left unsaid, not with schema size -- a precisely-described schema
+    gets no questions here at all."""
+    for field_id, info in confidence.items():
+        if info.get("required_stated"):
+            continue
+        if "." in field_id:
+            parent_name, sub_name = field_id.split(".", 1)
+            parent = builder.properties[parent_name]
+            currently_required = sub_name in (parent.required or [])
+            wants_required = ask_yes_no(f"Is '{sub_name}' (inside '{parent_name}') required on every record?")
+            if wants_required and not currently_required:
+                if parent.required is None:
+                    parent.required = []
+                parent.required.append(sub_name)
+            elif not wants_required and currently_required:
+                parent.required.remove(sub_name)
+        else:
+            currently_required = field_id in builder.required
+            wants_required = ask_yes_no(f"Is '{field_id}' required on every record?")
+            if wants_required and not currently_required:
+                builder.required.append(field_id)
+            elif not wants_required and currently_required:
+                builder.required.remove(field_id)
+
+
+def run_llm_schema_session() -> SchemaRequest:
+    """Free-text entry point: the user describes the form in plain language instead of answering
+    fixed questions. An LLM drafts the schema by calling the same SchemaBuilder methods the guided
+    wizard uses (see llm_schema_draft.py), a short targeted follow-up closes the highest-value gap
+    left unstated (required-ness), and the rest of the loop -- render, confirm, targeted
+    fix-one-field, write -- is the existing wizard machinery, unchanged."""
+    from llm_schema_draft import draft_schema_from_description, judge_schema_against_description, log_judge_result
+
+    print("=== Registry schema drafting -- describe it, don't answer a form ===")
+    print("(type 'quit' at any question to stop -- nothing is saved until the very end)\n")
+    schema_code = ask("What do you want to call this schema? (e.g. 'license-registry')")
+    description = ask("Describe the form you need, in your own words -- the fields, whether "
+                       "each one's required, and any groups (like an address with city/pincode):")
+
+    print("\nDrafting from your description...")
+    builder, confidence = draft_schema_from_description(schema_code, description)
+    if not builder.properties:
+        print("Couldn't draft any fields from that description -- let's build it field by field instead.")
+        configure_fields(builder)
+    else:
+        resolve_required_gaps(builder, confidence)
+
+        print("\nDouble-checking the draft against what you described...")
+        judged_definition = builder.build().model_dump(by_alias=True, exclude_none=True)["definition"]
+        judgment = judge_schema_against_description(description, judged_definition)
+        # Reduced snapshot (everything but the verbose per-gap "gaps" list -- recoverable later by
+        # re-running get_preview_completeness against the logged `definition` itself) so low
+        # preview coverage can eventually be correlated against human corrections and judge
+        # confidence, not just logged as an isolated number nobody can act on yet.
+        completeness = get_preview_completeness(judged_definition)
+        preview_coverage = {k: v for k, v in completeness.items() if k != "gaps"}
+        log_judge_result(schema_code, description, judged_definition, confidence, judgment,
+                          preview_coverage=preview_coverage)
+        if not judgment["ok"] and judgment["issues"]:
+            print("An automated check found possible mismatches -- worth checking in the preview:")
+            for issue in judgment["issues"]:
+                print(f"  - {issue}")
+        else:
+            print("No obvious mismatches found -- still worth reviewing the preview yourself.")
+
+    while True:
+        schema = builder.build()
+        data = schema.model_dump(by_alias=True, exclude_none=True)
+        errors = validate_schema_request(schema)
+        # Meta-schema check is separate from (and doesn't replace) validate_schema_request's
+        # referential-integrity checks above -- this one catches malformed regex/wrong keyword
+        # types (technical JSON Schema validity), which a dangling-reference check wouldn't; the
+        # reverse is also true, so both run every pass.
+        errors += validate_json_schema_syntax(data["definition"])
+
+        if errors:
+            print("\nVALIDATION FAILED -- fix these before a preview would mean anything:")
+            for e in errors:
+                print(f"  - {e}")
+            offer_fix_schema(builder)
+            continue
+
+        preview_path = os.path.abspath(f"{schema.schemaCode}_schema_preview.html")
+        render_schema_form_preview(data["schemaCode"], data["definition"], data.get("x-unique"),
+                                    data.get("x-indexes"), preview_path, field_confidence=confidence)
+        print(f"\nOpen this in a browser to review it visually:\n  {preview_path}")
+        print("(fields marked 'assumed' were guessed from your description, not stated -- check those first)")
+        print_preview_completeness(data["definition"])
+
+        if ask_yes_no("\nDoes this look right? Confirm to create the schema"):
+            break
+
+        print("Not confirmed -- let's fix just the part that's wrong (type 'quit' to stop entirely).")
+        offer_fix_schema(builder)
+
+    return schema
+
+
 def run_schema_session() -> SchemaRequest:
     """Runs the schema-authoring question sequence and returns the final, validated
     SchemaRequest. Split from main() so tests can drive the exact interactive code path."""
@@ -280,9 +402,12 @@ def run_schema_session() -> SchemaRequest:
             continue
 
         preview_path = os.path.abspath(f"{schema.schemaCode}_schema_preview.html")
-        render_schema_preview(schema, preview_path)
+        data = schema.model_dump(by_alias=True, exclude_none=True)
+        render_schema_form_preview(data["schemaCode"], data["definition"], data.get("x-unique"),
+                                    data.get("x-indexes"), preview_path)
         print(f"\nAll checks passed. Open this in a browser to review it visually:\n  {preview_path}")
-        print("(click any field for its exact definition)")
+        print("(this shows what the data-entry form will actually look like)")
+        print_preview_completeness(data["definition"])
 
         if ask_yes_no("\nDoes this look right? Confirm to create the schema"):
             break
@@ -335,7 +460,9 @@ def write_schema(schema: SchemaRequest) -> None:
 
 
 def main():
-    schema = run_schema_session()
+    mode = ask("How do you want to build this schema? Type 'describe' to describe it in plain "
+               "language (drafted by AI), or 'wizard' for guided step-by-step questions:")
+    schema = run_llm_schema_session() if mode.strip().lower().startswith("d") else run_schema_session()
     write_schema(schema)
 
     if ask_yes_no("\nAdd data records to this schema now?"):

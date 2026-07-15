@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import re
 
+import jsonschema
+
 from models import PropertyDef, SchemaRequest
 
 # Allows a dot, confirmed necessary by a real schema code found in the wild:
@@ -15,11 +17,17 @@ from models import PropertyDef, SchemaRequest
 _SCHEMA_CODE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
 
 
-def _validate_property(name: str, prop: PropertyDef, path: str) -> list[str]:
+def _validate_property(name: str, prop, path: str) -> list[str]:
     """Checks that apply to any property, one level deep or top-level -- called recursively for
-    a nested object's own sub-properties."""
+    a nested object's own sub-properties. `prop` may be a raw dict rather than a PropertyDef --
+    the "any possible JSON Schema" escape hatch for constructs PropertyDef can't represent
+    (oneOf/anyOf, etc, see models.py) -- no PropertyDef-shaped checks apply to those, so skip
+    rather than crash on attribute access a dict doesn't have."""
     errors = []
     label = f"{path}.{name}" if path else name
+
+    if isinstance(prop, dict):
+        return errors
 
     if prop.enum and prop.type not in ("string", "integer", "number"):
         errors.append(f"'{label}' has an enum but type '{prop.type}' -- enum values only make "
@@ -52,6 +60,26 @@ def _validate_property(name: str, prop: PropertyDef, path: str) -> list[str]:
     return errors
 
 
+def validate_json_schema_syntax(definition: dict) -> list[str]:
+    """Checks that `definition` is itself a technically valid JSON Schema document -- the same
+    class of check a JSON Schema validator's compile step (Ajv, in JavaScript; jsonschema here,
+    the closest Python equivalent) performs: malformed regex, wrong keyword types, structurally
+    illegal keyword combinations. This is a different, complementary check to
+    validate_schema_request's referential-integrity checks below, not a replacement for them: a
+    $ref pointing at a $defs name that doesn't exist is syntactically legal JSON Schema (this
+    catches nothing there -- render.py's own resolution already handles that gracefully), and a
+    stray non-standard key sitting in a property definition is syntactically legal too (the JSON
+    Schema spec itself says unrecognized keywords are ignored, not rejected -- catching that kind
+    of mistake needs the sanitization already built into SchemaBuilder, not a validator)."""
+    errors = []
+    try:
+        jsonschema.Draft202012Validator.check_schema(definition)
+    except jsonschema.exceptions.SchemaError as e:
+        path = "/".join(str(p) for p in e.path) or "(top level)"
+        errors.append(f"not a technically valid JSON Schema at {path}: {e.message}")
+    return errors
+
+
 def validate_schema_request(schema: SchemaRequest) -> list[str]:
     errors = []
     definition = schema.definition
@@ -79,6 +107,18 @@ def validate_schema_request(schema: SchemaRequest) -> list[str]:
     for index in schema.x_indexes or []:
         if index.fieldPath not in field_names:
             errors.append(f"index references '{index.fieldPath}', which is not a defined field")
+
+    for field, requires in (definition.dependentRequired or {}).items():
+        if field not in field_names:
+            errors.append(f"dependentRequired references '{field}', which is not a defined field")
+        for req in requires:
+            if req not in field_names:
+                errors.append(f"dependentRequired['{field}'] references '{req}', which is not a defined field")
+
+    for block in definition.allOf or []:
+        for req in (block.get("then") or {}).get("required") or []:
+            if req not in field_names:
+                errors.append(f"a conditional rule's 'then' requires '{req}', which is not a defined field")
 
     for name, prop in definition.properties.items():
         errors.extend(_validate_property(name, prop, ""))
