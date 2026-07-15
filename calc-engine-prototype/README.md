@@ -92,7 +92,7 @@ what it confirmed and corrected on its own.
 ```
 python3 test/test_calc_rule_builder.py     # CalculationRuleBuilder + validate.py, 25 checks
 python3 test/test_formula_parser.py        # the arithmetic-to-JSON-Logic parser, 15 checks
-python3 test/test_example_generator.py     # the worked-examples generator, 16 checks
+python3 test/test_example_generator.py     # the worked-examples generator, 19 checks
 python3 test/test_wizard.py                # the interactive layer itself, 24 checks
 python3 test/test_render.py                # the table preview + worked examples, 24 checks
 python3 test/test_write_path.py            # real HTTP paths against a throwaway local server, 17 checks
@@ -194,6 +194,16 @@ because none of them are structural:
   remaining 200,000") only reproduces its stated result (4500) with `/100`. Properly fixed in
   `_compute_slab`; the wizard's question reworded back to the correct convention (enter `5` for a
   5% bracket, not `0.05`) — see "Stress test against 30 real examples" below.
+- **A `PERCENTAGE`/`TAX` rule reading a *conditional* base via `componentRef` crashed when that
+  base's own condition didn't match.** Found while preparing a live demo: `CGST` (9% of
+  `STAFFING_FEE`) computed fine for `employeeCount` values inside `STAFFING_FEE`'s own 10–24 band,
+  but the worked-example generator's own "just past that boundary" scenario (`employeeCount = 25`)
+  produces no `STAFFING_FEE` line item at all — its condition simply didn't match — and `CGST`'s
+  `_amount_of()` lookup raised `KeyError` instead of recognizing that it doesn't apply either.
+  Fixed: `simulate.py` now treats a componentRef with no line item and no derived value as "this
+  rule doesn't apply in this context" (a new `ComponentNotApplicable` signal, caught in all three
+  evaluation loops), matching how a `RATE_MATRIX` rule with an unmatched condition already produces
+  no line item rather than crashing.
 
 None of these would have been caught by schema validation alone — they're exactly the class of
 mistake worked-example simulation exists to catch, including in the tool that generates them.
@@ -318,7 +328,7 @@ diagram to the library's own dependencies.
 - `test/test_formula_parser.py` — every supported operator, precedence, and every rejection path.
 - `test/test_example_generator.py` — confirms scenarios are genuinely targeted (not random) and that
   simulating them produces numerically sane results, including regression tests for each of the
-  four bugs found while building this feature (see below).
+  five bugs found while building this feature (see below).
 - `test/test_wizard.py` — the interactive layer, driven via a mocked `input()`, against real fixtures
   and edge cases (cancel, invalid retries, redo/add/delete-a-rule, rename the module, the registry
   field-picker against a mock server, and its fetch-failure fallback).

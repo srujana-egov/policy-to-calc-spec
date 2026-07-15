@@ -109,6 +109,37 @@ def test_04_formula_variable_reading_aggregation_via_componentref():
     check("04-does-not-crash", len(results) > 0, results)
 
 
+def test_04b_percentage_of_a_conditional_base_that_does_not_fire_does_not_crash():
+    """A real bug found while preparing a demo: a PERCENTAGE/TAX rule reading a *conditional*
+    RATE_MATRIX rule's amount via componentRef (e.g. CGST = 9% of a STAFFING_FEE banded on
+    employeeCount) crashed on a boundary scenario where employeeCount fell outside that band --
+    STAFFING_FEE produced no line item, so CGST's componentRef lookup raised instead of simply not
+    applying either. Fixed in simulate.py: a componentRef pointing at a component with no line
+    item and no derived value now skips the *referencing* rule too (ComponentNotApplicable),
+    rather than crashing simulate_estimate()."""
+    b = CalculationRuleBuilder("trade-license")
+    b.add_flat_rule("STAFFING_FEE", 1200,
+                     conditions={"employeeCount": {"jsonPath": "$.certificateDetail.employeeCount",
+                                                    "from": 10, "to": 24}},
+                     priority=10, effectiveFrom="2024-04-01")
+    b.add_percentage_rule("CGST", 9, "STAFFING_FEE", ruleType="TAX", priority=20,
+                           effectiveFrom="2024-04-01")
+    rules = _raw_rules(b)
+    results = run_scenarios(rules, generate_scenarios(rules))  # must not raise
+    check("04b-does-not-crash", len(results) > 0, results)
+
+    past_boundary = next(r for r in results if "just past that boundary" in r["label"])
+    check("04b-neither-rule-applies-past-the-band",
+          past_boundary["result"]["totalAmount"] == 0 and past_boundary["result"]["lineItems"] == [],
+          past_boundary["result"])
+
+    # "Typical case" is already inside the 10-24 band here (the baseline's own midpoint
+    # construction lands on it), so the dedicated "within band" scenario dedupes against it.
+    within_band = next(r for r in results if r["label"] == "Typical case (default values)")
+    check("04b-both-rules-apply-within-the-band",
+          within_band["result"]["totalAmount"] == 1308, within_band["result"])
+
+
 def test_05_baseline_uses_first_matching_condition_not_last():
     """Real bug found and fixed: two FLAT rules sharing a jsonPath (a banded fee) both tried to
     set the baseline's value for that path -- last-write-wins landed the 'typical case' baseline

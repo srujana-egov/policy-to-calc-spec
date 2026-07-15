@@ -138,6 +138,16 @@ def _eval_formula(node, variables: dict):
     return node
 
 
+class ComponentNotApplicable(Exception):
+    """Raised when a componentRef names a component that produced no line item and has no
+    derived value *in this specific context* -- e.g. a PERCENTAGE/TAX rule reading a conditional
+    RATE_MATRIX rule's amount, for a payload where that RATE_MATRIX rule's own condition didn't
+    match. The referencing rule doesn't apply either then; callers in simulate_estimate() catch
+    this and skip producing a line item for it, rather than crashing. Found live: a worked-example
+    boundary scenario (employeeCount just past a banded STAFFING_FEE's range) left STAFFING_FEE
+    with no line item, and CGST/SGST (9% of STAFFING_FEE) crashed instead of simply not firing."""
+
+
 def _amount_of(line_items: list[dict], derived: dict, component: str) -> float:
     """A componentRef normally reads another RATE_MATRIX/ADJUSTMENT/etc rule's already-computed
     line-item amount. But an AGGREGATION rule never produces one -- it has no calculationType/value
@@ -151,7 +161,7 @@ def _amount_of(line_items: list[dict], derived: dict, component: str) -> float:
             return li["amount"]
     if component in derived:
         return derived[component]
-    raise KeyError(f"component '{component}' not yet computed — missing dependsOn?")
+    raise ComponentNotApplicable(component)
 
 
 def _compute_amount(rule: dict, context, derived: dict, line_items: list[dict], relative: bool) -> float:
@@ -264,24 +274,36 @@ def simulate_estimate(rules: list[dict], entity_detail: dict) -> dict:
                 matching = [r for r in candidates if _rule_matches(r, se, derived, relative=True)]
                 best = _pick_most_specific(matching)
                 if best:
-                    amount = _apply_round_off(_compute_amount(best, se, derived, line_items, relative=True), best.get("roundOff"))
+                    try:
+                        amount = _apply_round_off(_compute_amount(best, se, derived, line_items, relative=True), best.get("roundOff"))
+                    except ComponentNotApplicable:
+                        continue
                     line_items.append(_line_item(best, amount, sub_entity_index=idx))
         else:
             matching = [r for r in candidates if _rule_matches(r, entity_detail, derived, relative=False)]
             best = _pick_most_specific(matching)
             if best:
-                amount = _apply_round_off(_compute_amount(best, entity_detail, derived, line_items, relative=False), best.get("roundOff"))
+                try:
+                    amount = _apply_round_off(_compute_amount(best, entity_detail, derived, line_items, relative=False), best.get("roundOff"))
+                except ComponentNotApplicable:
+                    continue
                 line_items.append(_line_item(best, amount))
 
     for rule in sorted((r for r in rules if r["ruleType"] == "ADJUSTMENT"), key=lambda r: r.get("priority", 100)):
         if _rule_matches(rule, entity_detail, derived, relative=False):
-            amount = _apply_round_off(_compute_amount(rule, entity_detail, derived, line_items, relative=False), rule.get("roundOff"))
+            try:
+                amount = _apply_round_off(_compute_amount(rule, entity_detail, derived, line_items, relative=False), rule.get("roundOff"))
+            except ComponentNotApplicable:
+                continue
             line_items.append(_line_item(rule, amount))
 
     remaining = [r for r in rules if r["ruleType"] in ("PENALTY", "INTEREST", "TAX")]
     for rule in _topo_order(remaining):
         if _rule_matches(rule, entity_detail, derived, relative=False):
-            amount = _apply_round_off(_compute_amount(rule, entity_detail, derived, line_items, relative=False), rule.get("roundOff"))
+            try:
+                amount = _apply_round_off(_compute_amount(rule, entity_detail, derived, line_items, relative=False), rule.get("roundOff"))
+            except ComponentNotApplicable:
+                continue
             line_items.append(_line_item(rule, amount))
 
     taxable_amount = sum(li["amount"] for li in line_items if li["ruleType"] in ("RATE_MATRIX", "ADJUSTMENT"))
