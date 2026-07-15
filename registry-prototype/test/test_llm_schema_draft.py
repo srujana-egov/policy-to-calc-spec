@@ -288,6 +288,54 @@ def test_16_add_raw_property_stores_verbatim():
     check("16-required-applied", "tags" in builder.required, builder.required)
 
 
+def test_16b_remove_field_drops_an_existing_field():
+    builder = SchemaBuilder("x")
+    confidence = {}
+    _execute_tool_call(builder, confidence, "add_field",
+                        {"label": "Billing Address", "type": "string", "required": False,
+                         "required_stated": True, "details_stated": True})
+    check("16b-field-present-before-removal", "billingAddress" in builder.properties)
+    result = _execute_tool_call(builder, confidence, "remove_field", {"field_name": "billingAddress"})
+    check("16b-ok", result == {"ok": True}, result)
+    check("16b-field-removed", "billingAddress" not in builder.properties, builder.properties)
+
+
+def test_16c_remove_field_rejects_unknown_field():
+    builder = SchemaBuilder("x")
+    confidence = {}
+    result = _execute_tool_call(builder, confidence, "remove_field", {"field_name": "ghost"})
+    check("16c-error-returned", "error" in result, result)
+
+
+def test_16d_set_required_flips_required_without_recreating_the_field():
+    builder = SchemaBuilder("x")
+    confidence = {}
+    _execute_tool_call(builder, confidence, "add_field",
+                        {"label": "Promo Code", "type": "string", "required": True,
+                         "required_stated": True, "details_stated": True, "pattern": "^[A-Z0-9]{6}$"})
+    check("16d-required-before", "promoCode" in builder.required)
+    result = _execute_tool_call(builder, confidence, "set_required",
+                                 {"field_name": "promoCode", "required": False})
+    check("16d-ok", result == {"ok": True}, result)
+    check("16d-no-longer-required", "promoCode" not in builder.required, builder.required)
+    check("16d-pattern-preserved-not-recreated", builder.properties["promoCode"].pattern == "^[A-Z0-9]{6}$",
+          builder.properties["promoCode"])
+
+
+def test_16e_set_required_is_idempotent_and_rejects_unknown_field():
+    builder = SchemaBuilder("x")
+    confidence = {}
+    _execute_tool_call(builder, confidence, "add_field",
+                        {"label": "Name", "type": "string", "required": False,
+                         "required_stated": True, "details_stated": True})
+    result = _execute_tool_call(builder, confidence, "set_required", {"field_name": "name", "required": False})
+    check("16e-idempotent-ok", result == {"ok": True}, result)
+    check("16e-still-not-required", "name" not in builder.required, builder.required)
+    unknown_result = _execute_tool_call(builder, confidence, "set_required",
+                                         {"field_name": "ghost", "required": True})
+    check("16e-unknown-field-error", "error" in unknown_result, unknown_result)
+
+
 def test_17_log_judge_result_writes_valid_jsonl_with_expected_fields():
     with tempfile.TemporaryDirectory() as tmp:
         log_path = str(Path(tmp) / "judge_log.jsonl")

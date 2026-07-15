@@ -67,17 +67,42 @@ fields when it doesn't fit:
   pattern" (e.g. "let them add any field starting with x- holding free text") -- use only when the \
   user genuinely describes open-ended/dynamic fields, not for a fixed, known set of fields (those \
   are just add_field calls).
-- define_reusable_schema + add_ref_field: when the SAME sub-shape (e.g. "an address with city and \
-  pincode") is used in more than one place, define it once with define_reusable_schema, then \
-  reference it wherever it's needed with add_ref_field, instead of repeating the same sub-fields \
-  via add_nested_field each time.
+- define_reusable_schema + add_ref_field: whenever the SAME sub-shape (e.g. "an address with city, \
+  pincode, and GPS coordinates") is described for TWO OR MORE fields, or whenever the user says \
+  two fields "have the same fields," "look the same," or "use the same structure" -- you MUST \
+  define it ONCE with define_reusable_schema and reference it with add_ref_field for EACH field \
+  that needs it. Do not call add_nested_field or add_raw_property more than once to duplicate the \
+  same sub-fields under two different field names -- that produces two independent copies that can \
+  drift apart, exactly what this pair of tools exists to avoid.
+- Nesting more than one level deep (e.g. an address that itself contains a GPS coordinates group \
+  with its own latitude/longitude sub-fields): add_nested_field only supports ONE level under a \
+  top-level object field. For anything deeper, write the WHOLE multi-level shape out at once, \
+  either as the `schema` argument to define_reusable_schema (if it's also reused elsewhere) or as \
+  the `raw_schema` argument to add_raw_property (if used only once) -- e.g. {"type": "object", \
+  "properties": {"city": {"type": "string"}, "geoLocation": {"type": "object", "properties": \
+  {"latitude": {"type": "number"}, "longitude": {"type": "number"}}, "required": ["latitude", \
+  "longitude"]}}, "required": ["city"]}. Nest as many levels as the description actually implies --
+  never flatten a described sub-group into loose top-level fields just because add_nested_field \
+  itself only goes one level.
+- "At least one item in a list must satisfy some condition" (e.g. "at least one uploaded document \
+  must be marked approved before the application is accepted," "at least one attached photo must \
+  be tagged as the primary photo"): use add_raw_property for the WHOLE list field directly (never \
+  add_field first, then add_raw_property second for the same field -- that creates two separate, \
+  orphaned fields instead of one), with a schema like {"type": "array", "items": {"type": "object", \
+  "properties": {...each item's own fields...}}, "contains": {"properties": {"status": {"const": \
+  "APPROVED"}}}, "minContains": 1} -- "contains" describes the condition at least one array entry \
+  must satisfy, "minContains" how many entries must satisfy it (usually 1). Do NOT invent a \
+  separate boolean field (like "hasApprovedDocument") as a substitute -- the condition belongs on \
+  the array itself, so it travels with the actual document data instead of a disconnected flag.
 - add_not_constraint: "the value must NOT be/match X" -- a banned exact value, or a pattern the \
   value must avoid (e.g. a username that must not be exactly 'admin'). Call this on a field \
   already added via add_field.
-- add_raw_property: an escape hatch for a genuinely exotic construct none of the tools above \
-  cover (an ordered list of specific types, "only fields matching this name pattern," etc). Use \
-  this LAST, only when nothing else fits -- the specific tools above are validated more \
-  precisely and should be preferred whenever they apply.
+- add_raw_property: also the general escape hatch for any other genuinely exotic construct none \
+  of the tools above cover (a fixed-order list of specific types via "prefixItems," "only field \
+  names matching this pattern" via "propertyNames," etc). Prefer the specific tools above whenever \
+  they apply -- they're validated more precisely -- but don't hesitate to reach for add_raw_property \
+  whenever the user's description implies a real JSON Schema shape none of the named tools cover;
+  it accepts any valid fragment, including nested "properties," "oneOf"/"anyOf," or any combination.
 
 When you've captured everything the user described, stop calling tools and reply with a short \
 plain-text summary of what you built (no more tool calls)."""
@@ -353,6 +378,39 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "remove_field",
+            "description": "Remove an existing top-level field that shouldn't be part of the schema "
+                            "after all -- e.g. the user said a field isn't needed anymore.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "field_name": {"type": "string",
+                                   "description": "The generated field name to remove, e.g. 'billingAddress'."},
+                },
+                "required": ["field_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_required",
+            "description": "Change whether an existing top-level field is required on every record, "
+                            "WITHOUT recreating it -- use this instead of removing and re-adding a "
+                            "field just to flip its required/optional status.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "field_name": {"type": "string"},
+                    "required": {"type": "boolean"},
+                },
+                "required": ["field_name", "required"],
+            },
+        },
+    },
 ]
 
 
@@ -451,18 +509,51 @@ def _execute_tool_call(builder: SchemaBuilder, confidence: dict, name: str, args
                                                    required=args.get("required", False))
             return {"field_name": field_name}
 
+        if name == "remove_field":
+            field_name = args["field_name"]
+            if field_name not in builder.properties:
+                return {"error": f"'{field_name}' isn't a known field -- nothing to remove"}
+            builder.remove_field(field_name)
+            return {"ok": True}
+
+        if name == "set_required":
+            field_name = args["field_name"]
+            if field_name not in builder.properties:
+                return {"error": f"'{field_name}' isn't a known field"}
+            wants_required = bool(args["required"])
+            currently_required = field_name in builder.required
+            if wants_required and not currently_required:
+                builder.required.append(field_name)
+            elif not wants_required and currently_required:
+                builder.required.remove(field_name)
+            return {"ok": True}
+
         return {"error": f"unknown tool '{name}'"}
     except ValueError as e:
         return {"error": str(e)}
 
 
-def draft_schema_from_description(schema_code: str, description: str, model: str = "gpt-4o-mini",
+def draft_schema_from_description(schema_code: str, description: str, model: str = "gpt-4o",
                                    max_rounds: int = 40) -> tuple[SchemaBuilder, dict]:
     """Runs the tool-calling loop end to end and returns the populated builder plus a confidence
     map (keyed by field id -- a bare name for top-level fields, "parent.child" for nested ones)
     recording which pieces the model inferred rather than the user actually stating. Caller (the
     wizard's free-text entry point) uses that map both to ask a targeted follow-up about
-    required-ness gaps and to flag the remaining guesses in the rendered preview."""
+    required-ness gaps and to flag the remaining guesses in the rendered preview.
+
+    Defaults to gpt-4o, not gpt-4o-mini: live-tested side by side on the same deliberately vague,
+    multi-construct description (conditionals + $ref reuse + nested geoLocation inside the ref'd
+    shape + oneOf + contains/minContains + patternProperties + not + dependentRequired, all in one
+    paragraph, none named by JSON Schema keyword). gpt-4o-mini reliably got the simple fields and
+    conditionals right but consistently mishandled the compound/deep constructs across repeated
+    runs -- inventing a substitute boolean field instead of contains/minContains, duplicating the
+    address into two flat objects instead of $ref-ing a shared one, flattening or orphaning nested
+    sub-groups instead of nesting them, and (once) nesting "required" as a bogus property key
+    inside a oneOf alternative's "properties" instead of as a sibling (a shape now defensively
+    rescued by _normalize_named_properties() in builder.py regardless of which model is used, but
+    still evidence of shakier reasoning under compound instructions). gpt-4o got every one of those
+    same constructs right in one pass. Matches judge_schema_against_description's own reasoning for
+    the identical model choice, for the identical reason -- see its docstring."""
     from openai import OpenAI
 
     client = OpenAI()
@@ -492,6 +583,68 @@ def draft_schema_from_description(schema_code: str, description: str, model: str
     return builder, confidence
 
 
+_FIX_SYSTEM_PROMPT_TEMPLATE = """You are helping a business user fix a registry schema you already \
+drafted, based on their feedback after reviewing the rendered preview. You do not write JSON \
+directly -- you call the same tools used to build the schema originally (add_field, \
+add_conditional, add_one_of_field, etc.) plus two tools specifically for fixes: remove_field (drop \
+a field that shouldn't be part of the schema after all) and set_required (flip an existing field's \
+required/optional status WITHOUT recreating it -- always prefer this over remove_field + add_field \
+for a pure required-ness change, since re-adding a field can lose constraints like pattern/enum \
+that weren't mentioned in the feedback).
+
+Make ONLY the changes the user's feedback actually implies -- do not rebuild, rename, or \
+re-describe fields that are already correct and weren't mentioned. If the feedback describes a \
+genuinely new field or rule, add it the same way you would when drafting from scratch.
+
+Here is the CURRENT schema definition, exactly as it stands before this fix:
+{current_definition}
+
+When you've applied the fix, stop calling tools and reply with a short summary of what you \
+changed."""
+
+
+def apply_fix_from_description(builder: SchemaBuilder, feedback: str, model: str = "gpt-4o",
+                                max_rounds: int = 20) -> None:
+    """The free-text counterpart to wizard.py's offer_fix_schema guided menu (redo one field's
+    fixed Q&A, 'add', 'delete FIELD_NAME', 'rename', 'constraints'): instead of picking a specific
+    target and re-answering fixed questions, the user just describes what's wrong in their own
+    words (e.g. "the promo code shouldn't be required" or "we don't need a separate billing
+    address, remove it"), and this applies exactly that change via the same validated builder
+    tools draft_schema_from_description uses -- narrowing the model's job to picking the right
+    tool call for an already-scoped fix, not freely rewriting the schema. Mutates `builder` in
+    place; the caller's existing re-validate/re-render loop (wizard.py's run_llm_schema_session)
+    catches anything the fix breaks (e.g. a dangling reference left by a removed field) the same
+    way it already catches mistakes from the guided fix path."""
+    from openai import OpenAI
+
+    client = OpenAI()
+    current_definition = builder.build().model_dump(by_alias=True, exclude_none=True)["definition"]
+    system_prompt = _FIX_SYSTEM_PROMPT_TEMPLATE.format(
+        current_definition=json.dumps(current_definition, indent=2))
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": feedback},
+    ]
+    confidence: dict[str, dict] = {}
+
+    for _ in range(max_rounds):
+        response = client.chat.completions.create(model=model, messages=messages, tools=TOOLS)
+        message = response.choices[0].message
+        messages.append(message.model_dump(exclude_none=True))
+
+        if not message.tool_calls:
+            if message.content:
+                print(f"  {message.content.strip()}")
+            break
+
+        for call in message.tool_calls:
+            args = json.loads(call.function.arguments)
+            result = _execute_tool_call(builder, confidence, call.function.name, args)
+            messages.append({"role": "tool", "tool_call_id": call.id, "content": json.dumps(result)})
+    else:
+        print(f"  (stopped after {max_rounds} rounds -- fix may be incomplete)")
+
+
 def judge_schema_against_description(description: str, definition: dict, model: str = "gpt-4o") -> dict:
     """A second, independent LLM call comparing the drafted schema against the *original*
     free-text description -- catches misunderstandings neither meta-schema validation (checks
@@ -499,14 +652,16 @@ def judge_schema_against_description(description: str, definition: dict, model: 
     meaning) can catch, e.g. a rule that should have been an if/then conditional but ended up as
     a plain always-required field.
 
-    Defaults to gpt-4o, not gpt-4o-mini (draft_schema_from_description's default): a real false
-    positive was found live-testing this with gpt-4o-mini -- it misread a correct allOf/if/then
-    conditional as "always required," flagging a schema that actually matched the description.
-    gpt-4o got the same case right. The judge's job (accurately interpreting an already-generated
-    nested JSON Schema structure) is a harder reasoning task than the drafting loop's (picking
-    which tool to call next), and worth the extra cost/latency for reliability, since a wrong
-    verdict here is exactly the kind of subtle, plausible-sounding mistake this whole project has
-    tried to avoid taking at face value.
+    Defaults to gpt-4o: a real false positive was found live-testing this with gpt-4o-mini -- it
+    misread a correct allOf/if/then conditional as "always required," flagging a schema that
+    actually matched the description. gpt-4o got the same case right. Independently, gpt-4o-mini
+    also turned out unreliable for draft_schema_from_description's own job (see that function's
+    docstring for the side-by-side comparison) -- both ended up needing the same upgrade, for
+    the same underlying reason: accurately reasoning about compound/nested JSON Schema structure
+    (drafting it correctly, or interpreting it correctly here) is a harder task than it first
+    looks, and worth the extra cost/latency for reliability. A wrong verdict here is exactly the
+    kind of subtle, plausible-sounding mistake this whole project has tried to avoid taking at
+    face value.
 
     This is informational, not a gate: it never blocks or auto-fixes anything, and it does not
     replace the interactive rendered form + human confirm, which stays the one thing that catches

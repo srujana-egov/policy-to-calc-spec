@@ -1,0 +1,197 @@
+{
+  "schemaCode": "trade-license-final-check",
+  "definition": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "applicantType": {
+        "type": "string",
+        "enum": [
+          "Individual",
+          "Company"
+        ],
+        "description": "Type of applicant, either Individual or Company."
+      },
+      "aadhaarNumber": {
+        "type": "string",
+        "description": "Aadhaar number for individual applicants."
+      },
+      "companyRegistrationNumber": {
+        "type": "string",
+        "description": "Registration number for company applicants."
+      },
+      "address": {
+        "$ref": "#/$defs/Address"
+      },
+      "billingAddress": {
+        "$ref": "#/$defs/Address"
+      },
+      "contactInformation": {
+        "oneOf": [
+          {
+            "properties": {
+              "email": {
+                "type": "string",
+                "format": "email"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          },
+          {
+            "properties": {
+              "phoneNumber": {
+                "type": "string",
+                "pattern": "^[0-9]{10}$"
+              }
+            },
+            "required": [
+              "phoneNumber"
+            ]
+          }
+        ],
+        "description": "Provide either an email or a phone number."
+      },
+      "documents": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "documentName": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "APPROVED",
+                "PENDING",
+                "REJECTED"
+              ]
+            }
+          }
+        },
+        "contains": {
+          "properties": {
+            "status": {
+              "const": "APPROVED"
+            }
+          }
+        },
+        "minContains": 1
+      },
+      "username": {
+        "type": "string",
+        "not": {
+          "const": "admin"
+        }
+      },
+      "promoCode": {
+        "type": "string"
+      },
+      "promoApprovalID": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "applicantType",
+      "address",
+      "billingAddress",
+      "documents",
+      "username"
+    ],
+    "allOf": [
+      {
+        "if": {
+          "properties": {
+            "applicantType": {
+              "const": "Individual"
+            }
+          },
+          "required": [
+            "applicantType"
+          ]
+        },
+        "then": {
+          "required": [
+            "aadhaarNumber"
+          ]
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "applicantType": {
+              "const": "Company"
+            }
+          },
+          "required": [
+            "applicantType"
+          ]
+        },
+        "then": {
+          "required": [
+            "companyRegistrationNumber"
+          ]
+        }
+      }
+    ],
+    "dependentRequired": {
+      "promoCode": [
+        "promoApprovalID"
+      ]
+    },
+    "patternProperties": {
+      "^x-.+": {
+        "type": "string"
+      }
+    },
+    "$defs": {
+      "Address": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "pincode": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$"
+          },
+          "geoLocation": {
+            "type": "object",
+            "properties": {
+              "latitude": {
+                "type": "number"
+              },
+              "longitude": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "latitude",
+              "longitude"
+            ]
+          }
+        },
+        "required": [
+          "street",
+          "city",
+          "state",
+          "country",
+          "pincode",
+          "geoLocation"
+        ]
+      }
+    }
+  }
+}

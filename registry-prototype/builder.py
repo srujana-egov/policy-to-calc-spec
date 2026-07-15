@@ -60,10 +60,33 @@ def _normalize_named_properties(properties: dict, required: list | None) -> tupl
     _sanitize_raw_property(), renaming `required` to match -- the same normalization
     add_field/add_nested_field give every field, applied here to a raw dict of sub-properties
     handed over whole (a oneOf alternative, a dependentSchemas addition) so naming and content
-    stay consistent regardless of entry point."""
+    stay consistent regardless of entry point.
+
+    Two real mistakes found live-testing the drafting loop, both the same underlying failure
+    mode: the model nests something that ISN'T a real sub-field AS A KEY INSIDE the "properties"
+    dict itself, instead of where it actually belongs. The first found was "required" itself --
+    e.g. {"properties": {"email": {...}, "required": ["email"]}} instead of {"properties":
+    {"email": {...}}, "required": ["email"]} -- rescued below by popping it out and merging it
+    into the real `required` list rather than leaving it to be treated as a property named
+    "required" whose schema is a bare list. The second, found later live-testing an entirely
+    different domain (a marriage-registry oneOf), was a stray, seemingly hallucinated key with a
+    non-schema value -- {"properties": {"passportNumber": {...}, "format": "number"}} -- "format"
+    is a real JSON Schema keyword, just not a legal one to find inside "properties" holding a bare
+    string; a property's schema must be an object (or boolean). Both shapes are invalid JSON
+    Schema, caught only much later by the final meta-schema check, if at all -- rather than adding
+    another one-off rescue for each new stray key the model invents, anything under "properties"
+    whose value isn't a dict (a real sub-schema) or a bool (JSON Schema's other legal sub-schema
+    shape) is dropped here as unsalvageable, except the "required" list, which is specifically
+    rescued since it has an obvious correct home."""
+    properties = dict(properties or {})
+    misplaced_required = properties.pop("required", None)
+    if isinstance(misplaced_required, list) and not required:
+        required = misplaced_required
     renamed: dict = {}
     rename_map = {}
-    for prop_name, prop_def in (properties or {}).items():
+    for prop_name, prop_def in properties.items():
+        if not isinstance(prop_def, (dict, bool)):
+            continue
         new_name = _dedupe_name_in(renamed, camel_field_name(prop_name))
         rename_map[prop_name] = new_name
         renamed[new_name] = _sanitize_raw_property(prop_def) if isinstance(prop_def, dict) else prop_def
@@ -198,12 +221,34 @@ class SchemaBuilder:
         equals X"). Stored as a raw if/then dict at the schema's top level (JSON Schema's own way
         of expressing this), validated against the fields that exist so far, the same guarding
         every other builder method already does (e.g. add_nested_field rejecting a non-object
-        parent)."""
+        parent).
+
+        Also backfills `if_value` into if_field's own enum (creating one if it has none) when
+        if_field is a plain string-typed field. A real reliability gap found live-testing the
+        drafting loop: nothing required the model to also give the trigger field an enum matching
+        the values used here, so it did so inconsistently across otherwise-identical runs --
+        sometimes producing a dropdown of the exact values the conditionals check against,
+        sometimes a free-text box a user could type anything into (silently never matching any
+        conditional at all). Guaranteeing this here, at the deterministic layer, is more reliable
+        than only telling the model to remember it in the prompt."""
         if if_field not in self.properties:
             raise ValueError(f"'{if_field}' isn't a known field -- add it first")
         for name in (then_required or []):
             if name not in self.properties:
                 raise ValueError(f"'{name}' isn't a known field -- add it first")
+        trigger = self.properties[if_field]
+        if isinstance(if_value, str):
+            if isinstance(trigger, PropertyDef) and trigger.type == "string":
+                if trigger.enum is None:
+                    trigger.enum = [if_value]
+                elif if_value not in trigger.enum:
+                    trigger.enum.append(if_value)
+            elif isinstance(trigger, dict) and trigger.get("type") == "string":
+                existing = trigger.get("enum")
+                if existing is None:
+                    trigger["enum"] = [if_value]
+                elif if_value not in existing:
+                    existing.append(if_value)
         self.conditionals.append({
             "if": {"properties": {if_field: {"const": if_value}}, "required": [if_field]},
             "then": {"required": list(then_required or [])},

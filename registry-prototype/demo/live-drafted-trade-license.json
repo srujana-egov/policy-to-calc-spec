@@ -1,0 +1,186 @@
+{
+  "schemaCode": "trade-license-live-demo-5",
+  "definition": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "applicantType": {
+        "type": "string",
+        "enum": [
+          "Individual",
+          "Company"
+        ]
+      },
+      "aadhaarNumber": {
+        "type": "string",
+        "pattern": "^[0-9]{12}$"
+      },
+      "companyRegistrationNumber": {
+        "type": "string"
+      },
+      "address": {
+        "$ref": "#/$defs/Address"
+      },
+      "billingAddress": {
+        "$ref": "#/$defs/Address"
+      },
+      "contactMethod": {
+        "oneOf": [
+          {
+            "properties": {
+              "email": {
+                "type": "string",
+                "format": "email"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          },
+          {
+            "properties": {
+              "phone": {
+                "type": "string",
+                "pattern": "^[0-9]{10}$"
+              }
+            },
+            "required": [
+              "phone"
+            ]
+          }
+        ]
+      },
+      "documents": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "APPROVED",
+                "REJECTED"
+              ]
+            }
+          }
+        },
+        "contains": {
+          "properties": {
+            "status": {
+              "const": "APPROVED"
+            }
+          }
+        },
+        "minContains": 1
+      },
+      "username": {
+        "type": "string",
+        "not": {
+          "const": "admin"
+        }
+      },
+      "promoCode": {
+        "type": "string"
+      },
+      "promoApprovalID": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "applicantType",
+      "address",
+      "billingAddress",
+      "documents",
+      "username"
+    ],
+    "allOf": [
+      {
+        "if": {
+          "properties": {
+            "applicantType": {
+              "const": "Individual"
+            }
+          },
+          "required": [
+            "applicantType"
+          ]
+        },
+        "then": {
+          "required": [
+            "aadhaarNumber"
+          ]
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "applicantType": {
+              "const": "Company"
+            }
+          },
+          "required": [
+            "applicantType"
+          ]
+        },
+        "then": {
+          "required": [
+            "companyRegistrationNumber"
+          ]
+        }
+      }
+    ],
+    "dependentRequired": {
+      "promoCode": [
+        "promoApprovalID"
+      ]
+    },
+    "patternProperties": {
+      "^x-.+": {
+        "type": "string"
+      }
+    },
+    "$defs": {
+      "Address": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "pincode": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$"
+          },
+          "geoLocation": {
+            "type": "object",
+            "properties": {
+              "latitude": {
+                "type": "number"
+              },
+              "longitude": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "latitude",
+              "longitude"
+            ]
+          }
+        },
+        "required": [
+          "street",
+          "city",
+          "pincode",
+          "geoLocation"
+        ]
+      }
+    }
+  }
+}

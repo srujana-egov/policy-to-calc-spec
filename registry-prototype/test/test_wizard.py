@@ -249,14 +249,36 @@ def test_wiz_08_rename_schema_code_via_offer_fix():
     check("wiz08-code-renamed", schema.schemaCode == "new-code")
 
 
-def test_wiz_09_unknown_fix_target_does_not_crash():
+def test_wiz_09_unknown_fix_target_triggers_ai_fix_path():
+    """Unrecognized input used to be a silent no-op ('nothing changed'); it's now treated as a
+    free-text fix request and handed to apply_fix_from_description -- the tedious guided-Q&A
+    complaint's actual fix. Mocked here (not a live call) so this test stays deterministic and
+    network-free, matching every other test in this suite; the live path itself is exercised
+    manually against the real API, same convention as draft_schema_from_description."""
     b = SchemaBuilder("x")
     b.add_field("Name", "string", required=True)
     before = set(b.properties.keys())
-    with canned_input(["NOT_A_REAL_FIELD"]) as queue:
-        wizard.offer_fix_schema(b)
-    check("wiz09-fields-unchanged", set(b.properties.keys()) == before)
+    with mock.patch("llm_schema_draft.apply_fix_from_description") as mock_fix:
+        with canned_input(["the name field shouldn't be required"]) as queue:
+            wizard.offer_fix_schema(b)
+    check("wiz09-ai-fix-invoked", mock_fix.called, mock_fix.called)
+    check("wiz09-called-with-builder-and-text",
+          mock_fix.call_args[0] == (b, "the name field shouldn't be required"), mock_fix.call_args)
+    check("wiz09-fields-unchanged-since-mocked", set(b.properties.keys()) == before)
     check("wiz09-answer-consumed", not queue)
+
+
+def test_wiz_09b_known_commands_still_take_the_deterministic_path_not_ai():
+    """Guard against the AI-fix fallback swallowing the still-supported deterministic commands --
+    'add', 'delete FIELD_NAME', 'rename', 'constraints', and an exact existing field name must
+    never reach apply_fix_from_description."""
+    b = SchemaBuilder("x")
+    b.add_field("Name", "string", required=True)
+    with mock.patch("llm_schema_draft.apply_fix_from_description") as mock_fix:
+        with canned_input(["delete name"]):
+            wizard.offer_fix_schema(b)
+    check("wiz09b-ai-fix-not-invoked-for-delete", not mock_fix.called)
+    check("wiz09b-field-actually-removed", "name" not in b.properties, b.properties)
 
 
 # ---------------------------------------------------------------------------

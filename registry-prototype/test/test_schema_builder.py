@@ -412,6 +412,70 @@ def test_25c_one_of_field_strips_leaked_tool_bookkeeping_keys():
     check("25c-real-keywords-kept", email_def == {"type": "string", "format": "email"}, email_def)
 
 
+def test_25d_one_of_field_rescues_required_misplaced_inside_properties():
+    """A real bug found live-testing the free-text drafting flow: the model's tool call nested
+    "required" AS A KEY INSIDE the "properties" dict itself (a sibling of "email"/"phone") instead
+    of passing it as oneOf alternative's own separate "required" field. Left alone, "required"
+    got treated as a property literally NAMED "required" whose schema was the bare list
+    ["email"] -- invalid JSON Schema, only caught downstream by the meta-schema check. Must be
+    rescued into the real "required" list instead."""
+    b = SchemaBuilder("x")
+    b.add_one_of_field("Contact Info", [
+        {"properties": {"email": {"type": "string", "format": "email"}, "phone": {"type": "string"},
+                         "required": ["email"]}},
+        {"properties": {"email": {"type": "string", "format": "email"}, "phone": {"type": "string"},
+                         "required": ["phone"]}},
+    ])
+    dumped = b.build().model_dump(by_alias=True, exclude_none=True)
+    alt0 = dumped["definition"]["properties"]["contactInfo"]["oneOf"][0]
+    alt1 = dumped["definition"]["properties"]["contactInfo"]["oneOf"][1]
+    check("25d-required-not-a-bogus-property", "required" not in alt0["properties"], alt0)
+    check("25d-required-rescued-as-sibling", alt0["required"] == ["email"], alt0)
+    check("25d-second-alt-rescued", alt1["required"] == ["phone"], alt1)
+    check("25d-second-alt-not-bogus", "required" not in alt1["properties"], alt1)
+
+    from validate import validate_json_schema_syntax
+    check("25d-meta-schema-valid", validate_json_schema_syntax(dumped["definition"]) == [])
+
+
+def test_25e_one_of_field_drops_hallucinated_non_schema_keys_inside_properties():
+    """A real bug found live-testing an entirely different domain (a marriage-registry oneOf):
+    the model nested a stray "format": "number" entry directly inside "properties", alongside the
+    real "passportNumber"/"birthCertificateNumber" sub-fields. "format" is a real JSON Schema
+    keyword, just not a legal one to find here holding a bare string -- a property's schema must
+    be an object (or boolean). The general fix: anything under "properties" that isn't a dict or
+    bool gets dropped as unsalvageable, not just the specific "required" case already handled."""
+    b = SchemaBuilder("x")
+    b.add_one_of_field("Proof Of Age", [
+        {"properties": {"birthCertificateNumber": {"type": "string"}, "format": "number"},
+         "required": ["birthCertificateNumber"]},
+        {"properties": {"passportNumber": {"type": "string"}, "format": "number"},
+         "required": ["passportNumber"]},
+    ])
+    dumped = b.build().model_dump(by_alias=True, exclude_none=True)
+    alt0 = dumped["definition"]["properties"]["proofOfAge"]["oneOf"][0]
+    alt1 = dumped["definition"]["properties"]["proofOfAge"]["oneOf"][1]
+    check("25e-hallucinated-key-dropped-alt0", "format" not in alt0["properties"], alt0)
+    check("25e-hallucinated-key-dropped-alt1", "format" not in alt1["properties"], alt1)
+    check("25e-real-field-kept", alt0["properties"]["birthCertificateNumber"] == {"type": "string"}, alt0)
+
+    from validate import validate_json_schema_syntax
+    check("25e-meta-schema-valid", validate_json_schema_syntax(dumped["definition"]) == [])
+
+
+def test_25f_one_of_field_keeps_boolean_schema_properties():
+    """The generalized filter must not throw out the OTHER legal JSON Schema shape for a
+    property's value -- a bare `true`/`false` sub-schema is unusual but valid."""
+    b = SchemaBuilder("x")
+    b.add_one_of_field("Weird", [
+        {"properties": {"anythingGoes": True, "nothingAllowed": False}, "required": []},
+    ])
+    dumped = b.build().model_dump(by_alias=True, exclude_none=True)
+    alt0 = dumped["definition"]["properties"]["weird"]["oneOf"][0]
+    check("25f-true-kept", alt0["properties"]["anythingGoes"] is True, alt0)
+    check("25f-false-kept", alt0["properties"]["nothingAllowed"] is False, alt0)
+
+
 def test_26_add_conditional_produces_correct_if_then_shape():
     b = SchemaBuilder("x")
     b.add_field("Applicant Type", "string", required=True, enum=["Individual", "Company"])
@@ -424,6 +488,53 @@ def test_26_add_conditional_produces_correct_if_then_shape():
     check("26-if-shape", block["if"] == {"properties": {"applicantType": {"const": "Individual"}},
                                           "required": ["applicantType"]}, block)
     check("26-then-shape", block["then"] == {"required": ["aadhaarNumber"]}, block)
+
+
+def test_26b_add_conditional_backfills_enum_onto_trigger_field_without_one():
+    """A real reliability gap found live-testing the drafting loop: the model isn't required to
+    also give the trigger field an enum matching the conditional's values, so it did so
+    inconsistently -- sometimes a dropdown of exactly the right choices, sometimes a free-text box
+    that could never actually match either conditional. add_conditional must guarantee the
+    trigger field ends up with the right enum regardless of what the caller already did."""
+    b = SchemaBuilder("x")
+    b.add_field("Applicant Type", "string", required=True)  # deliberately no enum
+    b.add_field("Aadhaar Number", "string")
+    b.add_field("Registration Number", "string")
+    b.add_conditional("applicantType", "Individual", then_required=["aadhaarNumber"])
+    check("26b-enum-created", b.properties["applicantType"].enum == ["Individual"], b.properties["applicantType"])
+    b.add_conditional("applicantType", "Company", then_required=["registrationNumber"])
+    check("26b-enum-accumulates", b.properties["applicantType"].enum == ["Individual", "Company"],
+          b.properties["applicantType"])
+
+
+def test_26c_add_conditional_does_not_duplicate_an_already_present_value():
+    b = SchemaBuilder("x")
+    b.add_field("Applicant Type", "string", required=True, enum=["Individual", "Company"])
+    b.add_field("Aadhaar Number", "string")
+    b.add_conditional("applicantType", "Individual", then_required=["aadhaarNumber"])
+    check("26c-no-duplicate", b.properties["applicantType"].enum == ["Individual", "Company"],
+          b.properties["applicantType"])
+
+
+def test_26d_add_conditional_backfills_enum_on_a_raw_dict_trigger_field():
+    b = SchemaBuilder("x")
+    b.add_raw_property("Applicant Type", {"type": "string"}, required=True)
+    b.add_field("Aadhaar Number", "string")
+    b.add_conditional("applicantType", "Individual", then_required=["aadhaarNumber"])
+    check("26d-enum-created-on-raw-dict", b.properties["applicantType"].get("enum") == ["Individual"],
+          b.properties["applicantType"])
+
+
+def test_26e_add_conditional_does_not_touch_non_string_trigger_fields():
+    """Enum-backfilling is scoped to string-typed trigger fields only -- PropertyDef.enum is
+    typed list[str], so appending a non-string if_value would violate the model. A boolean/numeric
+    trigger is rare enough in practice that skipping the backfill there (rather than risking a
+    type mismatch) is the safer default."""
+    b = SchemaBuilder("x")
+    b.add_field("Is Company", "boolean", required=True)
+    b.add_field("Registration Number", "string")
+    b.add_conditional("isCompany", True, then_required=["registrationNumber"])
+    check("26e-no-enum-added", b.properties["isCompany"].enum is None, b.properties["isCompany"])
 
 
 def test_27_add_conditional_rejects_unknown_fields():

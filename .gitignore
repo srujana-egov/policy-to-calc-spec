@@ -6,3 +6,4 @@ __pycache__/
 workflow-prototype/*_preview.html
 registry-prototype/*_preview.html
 calc-engine-prototype/*_preview.html
+registry-prototype/judge_log.jsonl

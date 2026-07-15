@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Form preview -- trade-license-application-v2</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 0; padding: 24px; }
+  h1 { font-size: 18px; margin: 0 0 4px 0; }
+  .subtitle { color: #888; font-size: 13px; margin-bottom: 18px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ddd; padding: 8px 12px; font-size: 13px; text-align: left; vertical-align: top; }
+  th { background: #f5f5f5; }
+  .required { color: #a01f1f; font-weight: bold; }
+  .optional { color: #888; }
+  .role-tag { background: #e8f0fe; color: #3a6fc4; border-radius: 10px; padding: 2px 8px; font-size: 11px; margin-right: 4px; display: inline-block; }
+  .form-field { margin-bottom: 14px; max-width: 420px; }
+  .form-field label { display: block; font-weight: 600; margin-bottom: 4px; }
+  .form-field input, .form-field select { width: 100%; padding: 6px 8px; font-size: 13px; border: 1px solid #ccc;
+    border-radius: 4px; box-sizing: border-box; }
+  .form-field input[type="checkbox"] { width: auto; }
+  .required-marker { color: #a01f1f; }
+  .field-help { color: #888; font-size: 12px; margin-top: 3px; }
+  fieldset.form-group { margin-bottom: 16px; border: 1px solid #ddd; border-radius: 6px; padding: 12px 14px; max-width: 460px; }
+  fieldset.form-group legend { font-weight: 600; padding: 0 4px; }
+  .form-field.unsupported { max-width: 640px; }
+  .raw-json-note { color: #a06a1f; font-size: 12px; margin-bottom: 4px; }
+  .raw-json { background: #fafafa; border: 1px solid #eee; border-radius: 6px; padding: 8px 10px; font-size: 12px;
+    font-family: ui-monospace, monospace; white-space: pre-wrap; }
+  .assumed-badge { background: #fff3cd; color: #8a6100; border-radius: 8px; padding: 1px 6px; font-size: 10px;
+    margin-left: 6px; font-weight: 600; }
+  .form-field.assumed input, .form-field.assumed select { border-color: #e0b34d; }
+  fieldset.form-group.assumed { border-color: #e0b34d; }
+  button[type="submit"] { margin-top: 8px; padding: 8px 20px; font-size: 13px; background: #3a6fc4; color: white;
+    border: none; border-radius: 5px; cursor: pointer; }
+  button[type="submit"]:hover { background: #2f5aa0; }
+  .validation-errors { background: #fdecea; border: 1px solid #f3b4ab; color: #8a1f11; padding: 10px 14px;
+    border-radius: 6px; margin-top: 16px; max-width: 460px; font-size: 13px; }
+  .validation-errors ul { margin: 6px 0 0 0; padding-left: 18px; }
+  .validation-ok { background: #eaf7ea; border: 1px solid #a8d8a8; color: #1f6b1f; padding: 10px 14px;
+    border-radius: 6px; margin-top: 16px; max-width: 460px; font-size: 13px; font-weight: 600; }
+  .oneof-group { max-width: 460px; }
+  .oneof-note { color: #888; font-size: 12px; margin: 2px 0 6px 0; }
+  .oneof-options { display: flex; gap: 14px; margin-bottom: 10px; }
+  .oneof-option { font-weight: 500; font-size: 13px; display: flex; align-items: center; gap: 4px; }
+  .oneof-alt { border-left: 3px solid #e8f0fe; padding-left: 12px; margin-bottom: 6px; }
+  .conditional-note { color: #3a6fc4; font-size: 12px; margin-top: 3px; font-style: italic; }
+  .not-note { color: #a01f1f; font-size: 12px; margin-top: 3px; font-style: italic; }
+  .dependent-schema-group { border-left: 3px solid #e8f0fe; padding-left: 12px; margin: 8px 0 14px 0; }
+  .dynamic-fields-group { margin-bottom: 16px; border: 1px dashed #ccc; border-radius: 6px; padding: 12px 14px; max-width: 460px; }
+  .dynamic-fields-group .group-label { font-weight: 600; margin-bottom: 4px; }
+  .dynamic-field-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .dynamic-field-row input { flex: 1; padding: 6px 8px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
+  .dynamic-field-row button, .add-dynamic-field button { padding: 4px 10px; font-size: 12px; border: 1px solid #ccc;
+    border-radius: 4px; background: #f5f5f5; cursor: pointer; }
+  .add-dynamic-field { display: flex; gap: 8px; margin-top: 6px; }
+  .add-dynamic-field input { flex: 1; padding: 6px 8px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
+  .dynamic-field-error { color: #a01f1f; font-size: 12px; margin-top: 3px; }
+  .completeness-summary { background: #f5f7fa; border: 1px solid #dde3ea; border-radius: 8px; padding: 14px 16px;
+    margin-bottom: 18px; max-width: 460px; }
+  .completeness-summary .percent { font-size: 22px; font-weight: 700; }
+  .completeness-summary .percent.full { color: #1f6b1f; }
+  .completeness-summary .percent.partial { color: #a06a1f; }
+  .completeness-breakdown { display: flex; gap: 18px; margin-top: 8px; font-size: 12px; color: #555; }
+  .completeness-breakdown .count { font-weight: 700; display: block; font-size: 15px; }
+  .completeness-conformance { margin-top: 10px; padding-top: 8px; border-top: 1px solid #dde3ea;
+    font-size: 12px; color: #555; }
+  .completeness-conformance strong { color: #8a1f11; }
+  .completeness-ack { background: #fff3cd; border: 1px solid #e0c060; border-radius: 6px; padding: 10px 14px;
+    margin: 12px 0; max-width: 460px; font-size: 13px; }
+  .completeness-ack label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+  .completeness-ack input[type="checkbox"] { margin-top: 2px; }
+  .preview-gap { background: #fff8ec; border: 1px solid #e6c778; border-radius: 6px; padding: 10px 12px;
+    margin-bottom: 8px; font-size: 13px; }
+  .gap-badge { background: #a06a1f; color: white; border-radius: 8px; padding: 2px 8px; font-size: 10px;
+    font-weight: 700; text-transform: uppercase; }
+  .gap-header { font-weight: 600; margin-top: 6px; }
+  .gap-header code { background: #f0e6d0; border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+  .gap-line { color: #886a2f; font-size: 12px; margin-top: 2px; }
+  .gap-section { margin-top: 8px; }
+  .gap-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: #9a8355; font-weight: 700; }
+  .gap-meaning { margin-top: 2px; }
+  .gap-limitation { margin-top: 2px; color: #665; }
+  .gap-footer { margin-top: 8px; font-size: 12px; color: #555; }
+  .gap-enforced-badge { background: #e2efe2; color: #1f6b1f; border-radius: 8px; padding: 1px 7px; font-size: 10px;
+    font-weight: 700; margin-right: 4px; }
+  .raw-json-details { margin-top: 8px; }
+  .raw-json-details summary { cursor: pointer; font-size: 12px; color: #3a6fc4; }
+  .conformance-note { color: #886a2f; font-size: 11px; margin-top: 2px; margin-bottom: 4px; }
+  .conformance-pass, .conformance-fail { font-size: 12px; margin-top: 3px; color: #1f6b1f; }
+  .conformance-skip { font-size: 12px; margin-top: 2px; color: #886a2f; font-style: italic; }
+  .conformance-error { font-size: 12px; margin-top: 3px; color: #555; font-style: italic; }
+  .conformance-surprising { font-size: 12px; margin-top: 4px; color: #8a1f11; font-weight: 700;
+    background: #fdecea; border: 1px solid #f3b4ab; border-radius: 4px; padding: 6px 8px; }
+  .conformance-detail { font-weight: 400; font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+  <h1>trade-license-application-v2</h1>
+  <div class="subtitle">This is what the data-entry form will look like, based on what you described. 13 field(s). Try filling it out -- Submit checks it against the rules you described, the same way the real data-entry form would.</div>
+  <div class="completeness-summary"><div>Form Preview <span class="percent partial">93% complete</span></div><div class="completeness-breakdown"><div><span class="count">27</span>Fully visualized</div><div><span class="count">2</span>Explained here (server still enforces it)</div><div><span class="count">0</span>Not explained (server still enforces it)</div></div><div class="completeness-conformance">Conformance checks: 8 executed across 2 rule(s), 8 behaved as expected.</div></div>
+  <form id="schemaPreviewForm">
+    <div class="form-field"><label for="applicantId">applicantId <span class="required-marker">*</span></label><input type="text" id="applicantId" name="applicantId" ></div><div class="form-field"><label for="applicantType">applicantType <span class="required-marker">*</span></label><select id="applicantType" name="applicantType"><option value="">-- choose --</option><option value="Individual">Individual</option><option value="Company">Company</option></select></div><div class="form-field"><label for="aadhaarNumber">aadhaarNumber <span id="aadhaarNumber__reqmarker" class="required-marker" style="display:none">*</span></label><input type="text" id="aadhaarNumber" name="aadhaarNumber" pattern="^[0-9]{12}$"><div class="conditional-note">Required only when 'applicantType' = 'Individual'.</div></div><div class="form-field"><label for="companyRegistrationNumber">companyRegistrationNumber <span id="companyRegistrationNumber__reqmarker" class="required-marker" style="display:none">*</span></label><input type="text" id="companyRegistrationNumber" name="companyRegistrationNumber" ><div class="conditional-note">Required only when 'applicantType' = 'Company'.</div></div><div class="form-field"><label for="tradeType">tradeType <span class="required-marker">*</span></label><select id="tradeType" name="tradeType"><option value="">-- choose --</option><option value="Retail">Retail</option><option value="Wholesale">Wholesale</option><option value="Manufacturing">Manufacturing</option></select></div><div class="form-field"><label for="username">username <span class="required-marker">*</span></label><input type="text" id="username" name="username" ><div class="not-note">Must not be exactly 'admin'.</div></div><fieldset class="form-group"><legend>address <span class="required-marker">*</span></legend><div class="form-field"><label for="address.city">city <span class="required-marker">*</span></label><input type="text" id="address.city" name="address.city" ></div><div class="form-field"><label for="address.pincode">pincode</label><input type="text" id="address.pincode" name="address.pincode" pattern="^[0-9]{6}$"></div><fieldset class="form-group"><legend>geoLocation</legend><div class="form-field"><label for="address.geoLocation.latitude">latitude <span class="required-marker">*</span></label><input type="number" id="address.geoLocation.latitude" name="address.geoLocation.latitude" min="-90" max="90" step="any"></div><div class="form-field"><label for="address.geoLocation.longitude">longitude <span class="required-marker">*</span></label><input type="number" id="address.geoLocation.longitude" name="address.geoLocation.longitude" min="-180" max="180" step="any"></div></fieldset></fieldset><fieldset class="form-group"><legend>billingAddress</legend><div class="form-field"><label for="billingAddress.city">city <span class="required-marker">*</span></label><input type="text" id="billingAddress.city" name="billingAddress.city" ></div><div class="form-field"><label for="billingAddress.pincode">pincode</label><input type="text" id="billingAddress.pincode" name="billingAddress.pincode" pattern="^[0-9]{6}$"></div><fieldset class="form-group"><legend>geoLocation</legend><div class="form-field"><label for="billingAddress.geoLocation.latitude">latitude <span class="required-marker">*</span></label><input type="number" id="billingAddress.geoLocation.latitude" name="billingAddress.geoLocation.latitude" min="-90" max="90" step="any"></div><div class="form-field"><label for="billingAddress.geoLocation.longitude">longitude <span class="required-marker">*</span></label><input type="number" id="billingAddress.geoLocation.longitude" name="billingAddress.geoLocation.longitude" min="-180" max="180" step="any"></div></fieldset></fieldset><div class="form-field oneof-group"><label>contactMethod</label><div class="oneof-note">Choose ONE of the following:</div><div class="oneof-options"><label class="oneof-option"><input type="radio" name="contactMethod__choice" value="0" checked onchange="toggleOneOf('contactMethod', 0, 2)"> email</label><label class="oneof-option"><input type="radio" name="contactMethod__choice" value="1" onchange="toggleOneOf('contactMethod', 1, 2)"> phone</label></div><div id="contactMethod__alt0" class="oneof-alt" style="display:block"><div class="form-field"><label for="contactMethod.alt0.email">email <span class="required-marker">*</span></label><input type="text" id="contactMethod.alt0.email" name="contactMethod.alt0.email" ></div></div><div id="contactMethod__alt1" class="oneof-alt" style="display:none"><div class="form-field"><label for="contactMethod.alt1.phone">phone <span class="required-marker">*</span></label><input type="text" id="contactMethod.alt1.phone" name="contactMethod.alt1.phone" pattern="^[0-9]{10}$"></div></div></div><div class="form-field unsupported"><label>documents</label><div class="preview-gap"><span class="gap-badge">Needs review</span><div class="gap-header">Advanced rule not fully visualized <code>contains + minContains</code></div><div class="gap-line">The form preview cannot enforce this rule visually.</div><div class="gap-section"><div class="gap-label">What this rule means</div><div class="gap-meaning">At least 1 item(s) in &#x27;documents&#x27; must have status = &#x27;APPROVED&#x27;.</div></div><div class="gap-section"><div class="gap-label">What the preview cannot show</div><div class="gap-limitation">The preview cannot check whether the items you enter here actually satisfy this rule.</div></div><div class="gap-section"><div class="gap-label">Conformance check</div><div class="conformance-note">Validated against the same JSON Schema Draft 2020-12 validator used to check your schema's syntax.</div><div class="conformance-pass">&#10003; An example that satisfies this rule was validated: <strong>PASS</strong>, as expected.</div><div class="conformance-fail">&#10003; An example that violates this rule was validated: <strong>FAIL</strong>, as expected.</div></div><div class="gap-footer"><span class="gap-enforced-badge">Stored &amp; validated</span>This rule will still be enforced by the Registry Service.</div></div><details class="raw-json-details"><summary>View raw JSON Schema for this field</summary><pre class="raw-json">{
+  &quot;type&quot;: &quot;array&quot;,
+  &quot;items&quot;: {
+    &quot;type&quot;: &quot;object&quot;,
+    &quot;properties&quot;: {
+      &quot;docType&quot;: {
+        &quot;type&quot;: &quot;string&quot;
+      },
+      &quot;status&quot;: {
+        &quot;type&quot;: &quot;string&quot;,
+        &quot;enum&quot;: [
+          &quot;APPROVED&quot;,
+          &quot;PENDING&quot;,
+          &quot;REJECTED&quot;
+        ]
+      }
+    }
+  },
+  &quot;contains&quot;: {
+    &quot;properties&quot;: {
+      &quot;status&quot;: {
+        &quot;const&quot;: &quot;APPROVED&quot;
+      }
+    }
+  },
+  &quot;minContains&quot;: 1
+}</pre></details></div><div class="form-field unsupported"><label>customFields</label><div class="preview-gap"><span class="gap-badge">Needs review</span><div class="gap-header">Advanced rule not fully visualized <code>propertyNames + unevaluatedProperties + patternProperties</code></div><div class="gap-line">The form preview cannot enforce this rule visually.</div><div class="gap-section"><div class="gap-label">What this rule means</div><div class="gap-meaning">Field names you add here must be exactly 3 digit(s). No extra fields are allowed beyond what&#x27;s explicitly defined here. Extra fields whose name must be exactly 3 digit(s) may be added here.</div></div><div class="gap-section"><div class="gap-label">What the preview cannot show</div><div class="gap-limitation">The preview cannot enforce naming rules on custom field names you might add. The preview cannot detect or block extra fields you might try to add. The preview only supports this as a top-level rule, not nested this deep.</div></div><div class="gap-section"><div class="gap-label">Conformance check</div><div class="conformance-note">Validated against the same JSON Schema Draft 2020-12 validator used to check your schema's syntax.</div><div class="conformance-pass">&#10003; An example that satisfies this rule was validated: <strong>PASS</strong>, as expected.</div><div class="conformance-fail">&#10003; An example that violates this rule was validated: <strong>FAIL</strong>, as expected.</div><div class="conformance-pass">&#10003; An example that satisfies this rule was validated: <strong>PASS</strong>, as expected.</div><div class="conformance-fail">&#10003; An example that violates this rule was validated: <strong>FAIL</strong>, as expected.</div><div class="conformance-pass">&#10003; An example that satisfies this rule was validated: <strong>PASS</strong>, as expected.</div><div class="conformance-fail">&#10003; An example that violates this rule was validated: <strong>FAIL</strong>, as expected.</div></div><div class="gap-footer"><span class="gap-enforced-badge">Stored &amp; validated</span>This rule will still be enforced by the Registry Service.</div></div><details class="raw-json-details"><summary>View raw JSON Schema for this field</summary><pre class="raw-json">{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {},
+  &quot;propertyNames&quot;: {
+    &quot;pattern&quot;: &quot;^[0-9]{3}$&quot;
+  },
+  &quot;patternProperties&quot;: {
+    &quot;^[0-9]{3}$&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    }
+  },
+  &quot;unevaluatedProperties&quot;: false
+}</pre></details></div><div class="form-field"><label for="promoCode">promoCode</label><input type="text" id="promoCode" name="promoCode" ></div><div class="form-field"><label for="promoApprovalId">promoApprovalId <span id="promoApprovalId__reqmarker" class="required-marker" style="display:none">*</span></label><input type="text" id="promoApprovalId" name="promoApprovalId" ><div class="conditional-note">Required only when 'promoCode' is filled in.</div></div>
+    
+    <div class="dynamic-fields-group"><div class="group-label">Custom fields (name must match: ^x-[a-z]+$)</div><div id="patternProps0__list"></div><div class="add-dynamic-field"><input type="text" id="patternProps0__nameInput" placeholder="field name"><button type="button" onclick="addDynamicField(0)">Add field</button></div><div id="patternProps0__error" class="dynamic-field-error"></div></div>
+    
+    <div class="completeness-ack"><label><input type="checkbox" id="completenessAck">I understand this preview doesn't fully show every rule above (see the "Needs review" sections) and confirm I've reviewed the explanations given.</label></div>
+    <button type="submit">Submit</button>
+  </form>
+  <div id="validationResult"></div>
+  <h3>Must be unique across every record</h3><ul><li>applicantId</li></ul>
+  <h3>Indexed for fast search/filter</h3><ul><li>tradeType (btree)</li></ul>
+  <details class="raw-json-details"><summary>View the full raw JSON Schema (for technical users)</summary><pre class="raw-json">{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;additionalProperties&quot;: false,
+  &quot;properties&quot;: {
+    &quot;applicantId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;applicantType&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;enum&quot;: [
+        &quot;Individual&quot;,
+        &quot;Company&quot;
+      ]
+    },
+    &quot;aadhaarNumber&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;pattern&quot;: &quot;^[0-9]{12}$&quot;
+    },
+    &quot;companyRegistrationNumber&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;tradeType&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;enum&quot;: [
+        &quot;Retail&quot;,
+        &quot;Wholesale&quot;,
+        &quot;Manufacturing&quot;
+      ]
+    },
+    &quot;username&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;not&quot;: {
+        &quot;const&quot;: &quot;admin&quot;
+      }
+    },
+    &quot;address&quot;: {
+      &quot;$ref&quot;: &quot;#/$defs/Address&quot;
+    },
+    &quot;billingAddress&quot;: {
+      &quot;$ref&quot;: &quot;#/$defs/Address&quot;
+    },
+    &quot;contactMethod&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;properties&quot;: {
+            &quot;email&quot;: {
+              &quot;type&quot;: &quot;string&quot;,
+              &quot;format&quot;: &quot;email&quot;
+            }
+          },
+          &quot;required&quot;: [
+            &quot;email&quot;
+          ]
+        },
+        {
+          &quot;properties&quot;: {
+            &quot;phone&quot;: {
+              &quot;type&quot;: &quot;string&quot;,
+              &quot;pattern&quot;: &quot;^[0-9]{10}$&quot;
+            }
+          },
+          &quot;required&quot;: [
+            &quot;phone&quot;
+          ]
+        }
+      ]
+    },
+    &quot;documents&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;properties&quot;: {
+          &quot;docType&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;status&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;enum&quot;: [
+              &quot;APPROVED&quot;,
+              &quot;PENDING&quot;,
+              &quot;REJECTED&quot;
+            ]
+          }
+        }
+      },
+      &quot;contains&quot;: {
+        &quot;properties&quot;: {
+          &quot;status&quot;: {
+            &quot;const&quot;: &quot;APPROVED&quot;
+          }
+        }
+      },
+      &quot;minContains&quot;: 1
+    },
+    &quot;customFields&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: {},
+      &quot;propertyNames&quot;: {
+        &quot;pattern&quot;: &quot;^[0-9]{3}$&quot;
+      },
+      &quot;patternProperties&quot;: {
+        &quot;^[0-9]{3}$&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        }
+      },
+      &quot;unevaluatedProperties&quot;: false
+    },
+    &quot;promoCode&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;promoApprovalId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;applicantId&quot;,
+    &quot;applicantType&quot;,
+    &quot;tradeType&quot;,
+    &quot;username&quot;,
+    &quot;address&quot;
+  ],
+  &quot;allOf&quot;: [
+    {
+      &quot;if&quot;: {
+        &quot;properties&quot;: {
+          &quot;applicantType&quot;: {
+            &quot;const&quot;: &quot;Individual&quot;
+          }
+        },
+        &quot;required&quot;: [
+          &quot;applicantType&quot;
+        ]
+      },
+      &quot;then&quot;: {
+        &quot;required&quot;: [
+          &quot;aadhaarNumber&quot;
+        ]
+      }
+    },
+    {
+      &quot;if&quot;: {
+        &quot;properties&quot;: {
+          &quot;applicantType&quot;: {
+            &quot;const&quot;: &quot;Company&quot;
+          }
+        },
+        &quot;required&quot;: [
+          &quot;applicantType&quot;
+        ]
+      },
+      &quot;then&quot;: {
+        &quot;required&quot;: [
+          &quot;companyRegistrationNumber&quot;
+        ]
+      }
+    }
+  ],
+  &quot;dependentRequired&quot;: {
+    &quot;promoCode&quot;: [
+      &quot;promoApprovalId&quot;
+    ]
+  },
+  &quot;patternProperties&quot;: {
+    &quot;^x-[a-z]+$&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    }
+  },
+  &quot;$defs&quot;: {
+    &quot;Address&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: {
+        &quot;city&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;pincode&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;pattern&quot;: &quot;^[0-9]{6}$&quot;
+        },
+        &quot;geoLocation&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;properties&quot;: {
+            &quot;latitude&quot;: {
+              &quot;type&quot;: &quot;number&quot;,
+              &quot;minimum&quot;: -90,
+              &quot;maximum&quot;: 90
+            },
+            &quot;longitude&quot;: {
+              &quot;type&quot;: &quot;number&quot;,
+              &quot;minimum&quot;: -180,
+              &quot;maximum&quot;: 180
+            }
+          },
+          &quot;required&quot;: [
+            &quot;latitude&quot;,
+            &quot;longitude&quot;
+          ]
+        }
+      },
+      &quot;required&quot;: [
+        &quot;city&quot;
+      ]
+    }
+  }
+}</pre></details>
+  <script>
+    const VALIDATION_SCHEMA = [
+  {
+    "kind": "field",
+    "id": "applicantId",
+    "label": "applicantId",
+    "type": "string",
+    "required": true
+  },
+  {
+    "kind": "field",
+    "id": "applicantType",
+    "label": "applicantType",
+    "type": "string",
+    "required": true
+  },
+  {
+    "kind": "field",
+    "id": "aadhaarNumber",
+    "label": "aadhaarNumber",
+    "type": "string",
+    "required": false,
+    "pattern": "^[0-9]{12}$",
+    "patternHint": "must be exactly 12 digit(s)"
+  },
+  {
+    "kind": "field",
+    "id": "companyRegistrationNumber",
+    "label": "companyRegistrationNumber",
+    "type": "string",
+    "required": false
+  },
+  {
+    "kind": "field",
+    "id": "tradeType",
+    "label": "tradeType",
+    "type": "string",
+    "required": true
+  },
+  {
+    "kind": "field",
+    "id": "username",
+    "label": "username",
+    "type": "string",
+    "required": true,
+    "notConst": "admin"
+  },
+  {
+    "kind": "group",
+    "children": [
+      {
+        "kind": "field",
+        "id": "address.city",
+        "label": "city",
+        "type": "string",
+        "required": true
+      },
+      {
+        "kind": "field",
+        "id": "address.pincode",
+        "label": "pincode",
+        "type": "string",
+        "required": false,
+        "pattern": "^[0-9]{6}$",
+        "patternHint": "must be exactly 6 digit(s)"
+      },
+      {
+        "kind": "group",
+        "children": [
+          {
+            "kind": "field",
+            "id": "address.geoLocation.latitude",
+            "label": "latitude",
+            "type": "number",
+            "required": true,
+            "minimum": -90,
+            "maximum": 90
+          },
+          {
+            "kind": "field",
+            "id": "address.geoLocation.longitude",
+            "label": "longitude",
+            "type": "number",
+            "required": true,
+            "minimum": -180,
+            "maximum": 180
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "group",
+    "children": [
+      {
+        "kind": "field",
+        "id": "billingAddress.city",
+        "label": "city",
+        "type": "string",
+        "required": true
+      },
+      {
+        "kind": "field",
+        "id": "billingAddress.pincode",
+        "label": "pincode",
+        "type": "string",
+        "required": false,
+        "pattern": "^[0-9]{6}$",
+        "patternHint": "must be exactly 6 digit(s)"
+      },
+      {
+        "kind": "group",
+        "children": [
+          {
+            "kind": "field",
+            "id": "billingAddress.geoLocation.latitude",
+            "label": "latitude",
+            "type": "number",
+            "required": true,
+            "minimum": -90,
+            "maximum": 90
+          },
+          {
+            "kind": "field",
+            "id": "billingAddress.geoLocation.longitude",
+            "label": "longitude",
+            "type": "number",
+            "required": true,
+            "minimum": -180,
+            "maximum": 180
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "oneOf",
+    "radioName": "contactMethod__choice",
+    "alternatives": [
+      {
+        "children": [
+          {
+            "kind": "field",
+            "id": "contactMethod.alt0.email",
+            "label": "email",
+            "type": "string",
+            "required": true
+          }
+        ]
+      },
+      {
+        "children": [
+          {
+            "kind": "field",
+            "id": "contactMethod.alt1.phone",
+            "label": "phone",
+            "type": "string",
+            "required": true,
+            "pattern": "^[0-9]{10}$",
+            "patternHint": "must be exactly 10 digit(s)"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "field",
+    "id": "promoCode",
+    "label": "promoCode",
+    "type": "string",
+    "required": false
+  },
+  {
+    "kind": "field",
+    "id": "promoApprovalId",
+    "label": "promoApprovalId",
+    "type": "string",
+    "required": false
+  }
+];
+    const CONDITIONALS = [
+  {
+    "triggerId": "applicantType",
+    "triggerValue": "Individual",
+    "thenRequired": [
+      "aadhaarNumber"
+    ]
+  },
+  {
+    "triggerId": "applicantType",
+    "triggerValue": "Company",
+    "thenRequired": [
+      "companyRegistrationNumber"
+    ]
+  },
+  {
+    "triggerId": "promoCode",
+    "presence": true,
+    "thenRequired": [
+      "promoApprovalId"
+    ]
+  }
+];
+    const DEPENDENT_SCHEMA_TRIGGERS = [];
+    const PATTERN_PROPERTIES = [
+  {
+    "index": 0,
+    "pattern": "^x-[a-z]+$",
+    "valueSchema": {
+      "type": "string"
+    }
+  }
+];
+    const NEEDS_COMPLETENESS_ACK = true;
+    const dynamicFieldCounters = {};
+
+    function toggleOneOf(fieldId, chosenIndex, altCount) {
+      for (let i = 0; i < altCount; i++) {
+        const el = document.getElementById(fieldId + '__alt' + i);
+        if (el) el.style.display = (i === chosenIndex) ? 'block' : 'none';
+      }
+    }
+
+    function buildDynamicControl(fieldId, schema) {
+      if (schema.enum) {
+        let opts = '<option value="">-- choose --</option>';
+        schema.enum.forEach(function(v) { opts += '<option value="' + v + '">' + v + '</option>'; });
+        return '<select id="' + fieldId + '">' + opts + '</select>';
+      }
+      if (schema.type === 'boolean') return '<input type="checkbox" id="' + fieldId + '">';
+      if (schema.type === 'integer' || schema.type === 'number') return '<input type="number" id="' + fieldId + '">';
+      return '<input type="text" id="' + fieldId + '">';
+    }
+
+    function addDynamicField(groupIndex) {
+      const group = PATTERN_PROPERTIES[groupIndex];
+      const nameInput = document.getElementById('patternProps' + groupIndex + '__nameInput');
+      const errorDiv = document.getElementById('patternProps' + groupIndex + '__error');
+      const name = nameInput.value.trim();
+      errorDiv.textContent = '';
+      if (!name) { errorDiv.textContent = 'Enter a field name.'; return; }
+      if (!new RegExp(group.pattern).test(name)) {
+        errorDiv.textContent = "'" + name + "' doesn't match the required pattern: " + group.pattern;
+        return;
+      }
+      const list = document.getElementById('patternProps' + groupIndex + '__list');
+      const already = Array.prototype.slice.call(list.querySelectorAll('.dynamic-field-row'))
+        .some(function(row) { return row.dataset.fieldName === name; });
+      if (already) { errorDiv.textContent = "'" + name + "' has already been added."; return; }
+      const count = (dynamicFieldCounters[groupIndex] = (dynamicFieldCounters[groupIndex] || 0) + 1);
+      const fieldId = 'patternProps' + groupIndex + '__field' + count;
+      const row = document.createElement('div');
+      row.className = 'dynamic-field-row';
+      row.dataset.fieldName = name;
+      row.innerHTML = '<label>' + name + '</label>' + buildDynamicControl(fieldId, group.valueSchema) +
+        '<button type="button" onclick="this.parentElement.remove()">Remove</button>';
+      list.appendChild(row);
+      nameInput.value = '';
+    }
+
+    function validateDynamicFields(errors) {
+      PATTERN_PROPERTIES.forEach(function(group) {
+        const list = document.getElementById('patternProps' + group.index + '__list');
+        if (!list) return;
+        const rows = list.querySelectorAll('.dynamic-field-row');
+        rows.forEach(function(row) {
+          const label = row.dataset.fieldName;
+          const input = row.querySelector('input, select');
+          if (!input) return;
+          if (input.type === 'checkbox') return;
+          const raw = input.value;
+          if (raw === '') return;
+          const schema = group.valueSchema;
+          if (schema.type === 'integer' || schema.type === 'number') {
+            const num = Number(raw);
+            if (Number.isNaN(num)) { errors.push(label + ' must be a number.'); return; }
+            if (schema.minimum !== undefined && num < schema.minimum) {
+              errors.push(label + ' must be at least ' + schema.minimum + '.');
+            }
+            if (schema.maximum !== undefined && num > schema.maximum) {
+              errors.push(label + ' must be at most ' + schema.maximum + '.');
+            }
+            return;
+          }
+          if (schema.minLength !== undefined && raw.length < schema.minLength) {
+            errors.push(label + ' must be at least ' + schema.minLength + ' character(s).');
+          }
+          if (schema.maxLength !== undefined && raw.length > schema.maxLength) {
+            errors.push(label + ' must be at most ' + schema.maxLength + ' character(s).');
+          }
+          if (schema.pattern) {
+            const re = new RegExp(schema.pattern);
+            if (!re.test(raw)) {
+              errors.push(label + ' ' + (schema.patternHint || ('must match the required format: ' + schema.pattern)) + '.');
+            }
+          }
+        });
+      });
+    }
+
+    function isPresent(el) {
+      const val = el.type === 'checkbox' ? el.checked : el.value;
+      return val !== '' && val !== false;
+    }
+
+    function conditionallyRequiredIds() {
+      // Which fields are required *right now*, given the current value of whatever field
+      // triggers each conditional -- re-evaluated live as the user fills in the form, and again
+      // on Submit, so the rule is enforced for real rather than just described in a note.
+      const extra = new Set();
+      CONDITIONALS.forEach(function(cond) {
+        const el = document.getElementById(cond.triggerId);
+        if (!el) return;
+        // dependentRequired has no specific triggerValue -- any non-empty value satisfies it,
+        // unlike an if/then conditional which only fires on one exact match.
+        const satisfied = cond.presence ? isPresent(el) : String(el.value) === String(cond.triggerValue);
+        if (satisfied) {
+          cond.thenRequired.forEach(function(id) { extra.add(id); });
+        }
+      });
+      return extra;
+    }
+
+    function updateConditionalMarkers() {
+      const extra = conditionallyRequiredIds();
+      CONDITIONALS.forEach(function(cond) {
+        cond.thenRequired.forEach(function(id) {
+          const marker = document.getElementById(id + '__reqmarker');
+          if (marker) marker.style.display = extra.has(id) ? 'inline' : 'none';
+        });
+      });
+    }
+
+    function updateDependentSchemaVisibility() {
+      DEPENDENT_SCHEMA_TRIGGERS.forEach(function(triggerId) {
+        const el = document.getElementById(triggerId);
+        const group = document.getElementById(triggerId + '__dependentSchema');
+        if (!el || !group) return;
+        group.style.display = isPresent(el) ? 'block' : 'none';
+      });
+    }
+
+    function validateNode(node, errors, extraRequired) {
+      if (node.kind === 'group') {
+        node.children.forEach(function(child) { validateNode(child, errors, extraRequired); });
+        return;
+      }
+      if (node.kind === 'oneOf') {
+        const radios = document.getElementsByName(node.radioName);
+        let chosen = 0;
+        for (let i = 0; i < radios.length; i++) { if (radios[i].checked) { chosen = i; break; } }
+        const alt = node.alternatives[chosen];
+        if (alt) alt.children.forEach(function(child) { validateNode(child, errors, extraRequired); });
+        return;
+      }
+      if (node.kind === 'dependentSchema') {
+        const triggerEl = document.getElementById(node.triggerId);
+        if (triggerEl && isPresent(triggerEl)) {
+          node.children.forEach(function(child) { validateNode(child, errors, extraRequired); });
+        }
+        return;
+      }
+      if (node.kind !== 'field') return;
+      const el = document.getElementById(node.id);
+      if (!el) return;
+      const label = node.label;
+      if (node.type === 'boolean') return;
+      const raw = el.value;
+      const isRequired = node.required || extraRequired.has(node.id);
+      if (raw === '') {
+        if (isRequired) errors.push(label + ' is required.');
+        return;
+      }
+      if (node.type === 'integer' || node.type === 'number') {
+        const num = Number(raw);
+        if (Number.isNaN(num)) { errors.push(label + ' must be a number.'); return; }
+        if (node.type === 'integer' && !Number.isInteger(num)) {
+          errors.push(label + ' must be a whole number.'); return;
+        }
+        if (node.minimum !== undefined && num < node.minimum) {
+          errors.push(label + ' must be at least ' + node.minimum + '.');
+        }
+        if (node.maximum !== undefined && num > node.maximum) {
+          errors.push(label + ' must be at most ' + node.maximum + '.');
+        }
+        return;
+      }
+      if (node.minLength !== undefined && raw.length < node.minLength) {
+        errors.push(label + ' must be at least ' + node.minLength + ' character(s) (currently ' + raw.length + ').');
+      }
+      if (node.maxLength !== undefined && raw.length > node.maxLength) {
+        errors.push(label + ' must be at most ' + node.maxLength + ' character(s) (currently ' + raw.length + ').');
+      }
+      if (node.pattern) {
+        const re = new RegExp(node.pattern);
+        if (!re.test(raw)) {
+          errors.push(label + ' ' + (node.patternHint || ('must match the required format: ' + node.pattern)) + '.');
+        }
+      }
+      if (node.notPattern && new RegExp(node.notPattern).test(raw)) {
+        errors.push(label + ' must not match the pattern: ' + node.notPattern + '.');
+      }
+      if (node.notConst !== undefined && String(node.notConst) === raw) {
+        errors.push(label + " must not be exactly '" + node.notConst + "'.");
+      }
+      if (node.notEnum && node.notEnum.some(function(v) { return String(v) === raw; })) {
+        errors.push(label + ' must not be one of the banned values.');
+      }
+    }
+
+    const previewForm = document.getElementById('schemaPreviewForm');
+    previewForm.addEventListener('input', updateConditionalMarkers);
+    previewForm.addEventListener('change', updateConditionalMarkers);
+    previewForm.addEventListener('input', updateDependentSchemaVisibility);
+    previewForm.addEventListener('change', updateDependentSchemaVisibility);
+    updateConditionalMarkers();
+    updateDependentSchemaVisibility();
+
+    previewForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      const result = document.getElementById('validationResult');
+      if (NEEDS_COMPLETENESS_ACK) {
+        const ack = document.getElementById('completenessAck');
+        if (!ack || !ack.checked) {
+          result.innerHTML = '<div class="validation-errors"><b>This would not be accepted:</b><ul>' +
+            '<li>Please acknowledge the preview limitations above before continuing.</li></ul></div>';
+          return;
+        }
+      }
+      const errors = [];
+      const extraRequired = conditionallyRequiredIds();
+      VALIDATION_SCHEMA.forEach(function(node) { validateNode(node, errors, extraRequired); });
+      validateDynamicFields(errors);
+      if (errors.length) {
+        result.innerHTML = '<div class="validation-errors"><b>This would not be accepted:</b><ul>' +
+          errors.map(function(msg) { return '<li>' + msg + '</li>'; }).join('') + '</ul></div>';
+      } else {
+        result.innerHTML = '<div class="validation-ok">This record would be accepted.</div>';
+      }
+    });
+  </script>
+</body>
+</html>

@@ -229,9 +229,11 @@ def offer_fix_schema(builder: SchemaBuilder) -> None:
     field_names = ", ".join(builder.properties.keys())
     choice = ask(
         "What do you want to fix? Type a field name to redo it, 'add' for a new field, "
-        "'delete FIELD_NAME' to remove one, 'rename' for the schema's own code, or "
-        "'constraints' to redo which fields must be unique/indexed (e.g. after deleting a "
-        f"field one of them referenced).\nFields: {field_names}"
+        "'delete FIELD_NAME' to remove one, 'rename' for the schema's own code, "
+        "'constraints' to redo which fields must be unique/indexed, or just describe the fix "
+        "in your own words (e.g. \"the promo code shouldn't be required\" or \"remove the "
+        "billing address, we don't need it\") and it'll be applied for you.\n"
+        f"Fields: {field_names}"
     )
     lowered = choice.lower()
     if lowered == "rename":
@@ -254,7 +256,15 @@ def offer_fix_schema(builder: SchemaBuilder) -> None:
     elif choice in builder.properties:
         redo_field(builder, choice)
     else:
-        print(f"  '{choice}' isn't a known field -- nothing changed")
+        # Not a recognized command or an exact existing field name -- rather than a dead-end
+        # "nothing changed" message, treat it as a free-text fix request and apply it the same
+        # way the free-text drafting path builds a schema in the first place: an LLM picking the
+        # right validated builder tool call(s), not freely rewriting the JSON. This is the
+        # "tedious guided Q&A" complaint's actual fix -- the targeted-redo/add/delete/rename/
+        # constraints paths above still exist for anyone who prefers the deterministic route.
+        from llm_schema_draft import apply_fix_from_description
+        print("\nApplying your fix...")
+        apply_fix_from_description(builder, choice)
 
 
 def print_preview_completeness(definition: dict) -> None:

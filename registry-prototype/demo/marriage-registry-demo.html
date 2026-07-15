@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Form preview -- marriage-registry-demo</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 0; padding: 24px; }
+  h1 { font-size: 18px; margin: 0 0 4px 0; }
+  .subtitle { color: #888; font-size: 13px; margin-bottom: 18px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ddd; padding: 8px 12px; font-size: 13px; text-align: left; vertical-align: top; }
+  th { background: #f5f5f5; }
+  .required { color: #a01f1f; font-weight: bold; }
+  .optional { color: #888; }
+  .role-tag { background: #e8f0fe; color: #3a6fc4; border-radius: 10px; padding: 2px 8px; font-size: 11px; margin-right: 4px; display: inline-block; }
+  .form-field { margin-bottom: 14px; max-width: 420px; }
+  .form-field label { display: block; font-weight: 600; margin-bottom: 4px; }
+  .form-field input, .form-field select { width: 100%; padding: 6px 8px; font-size: 13px; border: 1px solid #ccc;
+    border-radius: 4px; box-sizing: border-box; }
+  .form-field input[type="checkbox"] { width: auto; }
+  .required-marker { color: #a01f1f; }
+  .field-help { color: #888; font-size: 12px; margin-top: 3px; }
+  fieldset.form-group { margin-bottom: 16px; border: 1px solid #ddd; border-radius: 6px; padding: 12px 14px; max-width: 460px; }
+  fieldset.form-group legend { font-weight: 600; padding: 0 4px; }
+  .form-field.unsupported { max-width: 640px; }
+  .raw-json-note { color: #a06a1f; font-size: 12px; margin-bottom: 4px; }
+  .raw-json { background: #fafafa; border: 1px solid #eee; border-radius: 6px; padding: 8px 10px; font-size: 12px;
+    font-family: ui-monospace, monospace; white-space: pre-wrap; }
+  .assumed-badge { background: #fff3cd; color: #8a6100; border-radius: 8px; padding: 1px 6px; font-size: 10px;
+    margin-left: 6px; font-weight: 600; }
+  .form-field.assumed input, .form-field.assumed select { border-color: #e0b34d; }
+  fieldset.form-group.assumed { border-color: #e0b34d; }
+  button[type="submit"] { margin-top: 8px; padding: 8px 20px; font-size: 13px; background: #3a6fc4; color: white;
+    border: none; border-radius: 5px; cursor: pointer; }
+  button[type="submit"]:hover { background: #2f5aa0; }
+  .validation-errors { background: #fdecea; border: 1px solid #f3b4ab; color: #8a1f11; padding: 10px 14px;
+    border-radius: 6px; margin-top: 16px; max-width: 460px; font-size: 13px; }
+  .validation-errors ul { margin: 6px 0 0 0; padding-left: 18px; }
+  .validation-ok { background: #eaf7ea; border: 1px solid #a8d8a8; color: #1f6b1f; padding: 10px 14px;
+    border-radius: 6px; margin-top: 16px; max-width: 460px; font-size: 13px; font-weight: 600; }
+  .oneof-group { max-width: 460px; }
+  .oneof-note { color: #888; font-size: 12px; margin: 2px 0 6px 0; }
+  .oneof-options { display: flex; gap: 14px; margin-bottom: 10px; }
+  .oneof-option { font-weight: 500; font-size: 13px; display: flex; align-items: center; gap: 4px; }
+  .oneof-alt { border-left: 3px solid #e8f0fe; padding-left: 12px; margin-bottom: 6px; }
+  .conditional-note { color: #3a6fc4; font-size: 12px; margin-top: 3px; font-style: italic; }
+  .not-note { color: #a01f1f; font-size: 12px; margin-top: 3px; font-style: italic; }
+  .dependent-schema-group { border-left: 3px solid #e8f0fe; padding-left: 12px; margin: 8px 0 14px 0; }
+  .dynamic-fields-group { margin-bottom: 16px; border: 1px dashed #ccc; border-radius: 6px; padding: 12px 14px; max-width: 460px; }
+  .dynamic-fields-group .group-label { font-weight: 600; margin-bottom: 4px; }
+  .dynamic-field-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .dynamic-field-row input { flex: 1; padding: 6px 8px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
+  .dynamic-field-row button, .add-dynamic-field button { padding: 4px 10px; font-size: 12px; border: 1px solid #ccc;
+    border-radius: 4px; background: #f5f5f5; cursor: pointer; }
+  .add-dynamic-field { display: flex; gap: 8px; margin-top: 6px; }
+  .add-dynamic-field input { flex: 1; padding: 6px 8px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
+  .dynamic-field-error { color: #a01f1f; font-size: 12px; margin-top: 3px; }
+  .completeness-summary { background: #f5f7fa; border: 1px solid #dde3ea; border-radius: 8px; padding: 14px 16px;
+    margin-bottom: 18px; max-width: 460px; }
+  .completeness-summary .percent { font-size: 22px; font-weight: 700; }
+  .completeness-summary .percent.full { color: #1f6b1f; }
+  .completeness-summary .percent.partial { color: #a06a1f; }
+  .completeness-breakdown { display: flex; gap: 18px; margin-top: 8px; font-size: 12px; color: #555; }
+  .completeness-breakdown .count { font-weight: 700; display: block; font-size: 15px; }
+  .completeness-conformance { margin-top: 10px; padding-top: 8px; border-top: 1px solid #dde3ea;
+    font-size: 12px; color: #555; }
+  .completeness-conformance strong { color: #8a1f11; }
+  .completeness-ack { background: #fff3cd; border: 1px solid #e0c060; border-radius: 6px; padding: 10px 14px;
+    margin: 12px 0; max-width: 460px; font-size: 13px; }
+  .completeness-ack label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+  .completeness-ack input[type="checkbox"] { margin-top: 2px; }
+  .preview-gap { background: #fff8ec; border: 1px solid #e6c778; border-radius: 6px; padding: 10px 12px;
+    margin-bottom: 8px; font-size: 13px; }
+  .gap-badge { background: #a06a1f; color: white; border-radius: 8px; padding: 2px 8px; font-size: 10px;
+    font-weight: 700; text-transform: uppercase; }
+  .gap-header { font-weight: 600; margin-top: 6px; }
+  .gap-header code { background: #f0e6d0; border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+  .gap-line { color: #886a2f; font-size: 12px; margin-top: 2px; }
+  .gap-section { margin-top: 8px; }
+  .gap-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: #9a8355; font-weight: 700; }
+  .gap-meaning { margin-top: 2px; }
+  .gap-limitation { margin-top: 2px; color: #665; }
+  .gap-footer { margin-top: 8px; font-size: 12px; color: #555; }
+  .gap-enforced-badge { background: #e2efe2; color: #1f6b1f; border-radius: 8px; padding: 1px 7px; font-size: 10px;
+    font-weight: 700; margin-right: 4px; }
+  .raw-json-details { margin-top: 8px; }
+  .raw-json-details summary { cursor: pointer; font-size: 12px; color: #3a6fc4; }
+  .conformance-note { color: #886a2f; font-size: 11px; margin-top: 2px; margin-bottom: 4px; }
+  .conformance-pass, .conformance-fail { font-size: 12px; margin-top: 3px; color: #1f6b1f; }
+  .conformance-skip { font-size: 12px; margin-top: 2px; color: #886a2f; font-style: italic; }
+  .conformance-error { font-size: 12px; margin-top: 3px; color: #555; font-style: italic; }
+  .conformance-surprising { font-size: 12px; margin-top: 4px; color: #8a1f11; font-weight: 700;
+    background: #fdecea; border: 1px solid #f3b4ab; border-radius: 4px; padding: 6px 8px; }
+  .conformance-detail { font-weight: 400; font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+  <h1>marriage-registry-demo</h1>
+  <div class="subtitle">This is what the data-entry form will look like, based on what you described. 9 field(s). Try filling it out -- Submit checks it against the rules you described, the same way the real data-entry form would.</div>
+  <div class="completeness-summary"><div>Form Preview <span class="percent partial">96% complete</span></div><div class="completeness-breakdown"><div><span class="count">24</span>Fully visualized</div><div><span class="count">1</span>Explained here (server still enforces it)</div><div><span class="count">0</span>Not explained (server still enforces it)</div></div><div class="completeness-conformance">Conformance checks: 2 executed across 1 rule(s), 2 behaved as expected.</div></div>
+  <form id="schemaPreviewForm">
+    <div class="form-field"><label for="marriageType">marriageType <span class="required-marker">*</span></label><select id="marriageType" name="marriageType"><option value="">-- choose --</option><option value="Religious">Religious</option><option value="Court">Court</option></select></div><fieldset class="form-group"><legend>bride <span class="required-marker">*</span></legend><div class="form-field"><label for="bride.name">name <span class="required-marker">*</span></label><input type="text" id="bride.name" name="bride.name" ></div><div class="form-field"><label for="bride.age">age <span class="required-marker">*</span></label><input type="number" id="bride.age" name="bride.age" step="1"></div><div class="form-field"><label for="bride.nationality">nationality <span class="required-marker">*</span></label><input type="text" id="bride.nationality" name="bride.nationality" ></div><div class="form-field"><label for="bride.iDProofType">iDProofType <span class="required-marker">*</span></label><input type="text" id="bride.iDProofType" name="bride.iDProofType" ></div></fieldset><fieldset class="form-group"><legend>groom <span class="required-marker">*</span></legend><div class="form-field"><label for="groom.name">name <span class="required-marker">*</span></label><input type="text" id="groom.name" name="groom.name" ></div><div class="form-field"><label for="groom.age">age <span class="required-marker">*</span></label><input type="number" id="groom.age" name="groom.age" step="1"></div><div class="form-field"><label for="groom.nationality">nationality <span class="required-marker">*</span></label><input type="text" id="groom.nationality" name="groom.nationality" ></div><div class="form-field"><label for="groom.iDProofType">iDProofType <span class="required-marker">*</span></label><input type="text" id="groom.iDProofType" name="groom.iDProofType" ></div></fieldset><div class="form-field oneof-group"><label>proofOfAge <span class="required-marker">*</span></label><div class="oneof-note">Choose ONE of the following:</div><div class="oneof-options"><label class="oneof-option"><input type="radio" name="proofOfAge__choice" value="0" checked onchange="toggleOneOf('proofOfAge', 0, 2)"> birthCertificate</label><label class="oneof-option"><input type="radio" name="proofOfAge__choice" value="1" onchange="toggleOneOf('proofOfAge', 1, 2)"> passport</label></div><div id="proofOfAge__alt0" class="oneof-alt" style="display:block"><div class="form-field"><label for="proofOfAge.alt0.birthCertificate">birthCertificate <span class="required-marker">*</span></label><input type="text" id="proofOfAge.alt0.birthCertificate" name="proofOfAge.alt0.birthCertificate" ></div></div><div id="proofOfAge__alt1" class="oneof-alt" style="display:none"><div class="form-field"><label for="proofOfAge.alt1.passport">passport <span class="required-marker">*</span></label><input type="text" id="proofOfAge.alt1.passport" name="proofOfAge.alt1.passport" ></div></div></div><div class="form-field oneof-group"><label>proofOfAge2 <span class="required-marker">*</span></label><div class="oneof-note">Choose ONE of the following:</div><div class="oneof-options"><label class="oneof-option"><input type="radio" name="proofOfAge2__choice" value="0" checked onchange="toggleOneOf('proofOfAge2', 0, 2)"> birthCertificate</label><label class="oneof-option"><input type="radio" name="proofOfAge2__choice" value="1" onchange="toggleOneOf('proofOfAge2', 1, 2)"> passport</label></div><div id="proofOfAge2__alt0" class="oneof-alt" style="display:block"><div class="form-field"><label for="proofOfAge2.alt0.birthCertificate">birthCertificate <span class="required-marker">*</span></label><input type="text" id="proofOfAge2.alt0.birthCertificate" name="proofOfAge2.alt0.birthCertificate" ></div></div><div id="proofOfAge2__alt1" class="oneof-alt" style="display:none"><div class="form-field"><label for="proofOfAge2.alt1.passport">passport <span class="required-marker">*</span></label><input type="text" id="proofOfAge2.alt1.passport" name="proofOfAge2.alt1.passport" ></div></div></div><div class="form-field"><label for="officiantSName">officiantSName <span id="officiantSName__reqmarker" class="required-marker" style="display:none">*</span></label><input type="text" id="officiantSName" name="officiantSName" ><div class="conditional-note">Required only when 'marriageType' = 'Religious'.</div></div><div class="form-field"><label for="courtOrderNumber">courtOrderNumber <span id="courtOrderNumber__reqmarker" class="required-marker" style="display:none">*</span></label><input type="text" id="courtOrderNumber" name="courtOrderNumber" ><div class="conditional-note">Required only when 'marriageType' = 'Court'.</div></div><div class="form-field unsupported"><label>witnesses <span class="required-marker">*</span></label><div class="preview-gap"><span class="gap-badge">Needs review</span><div class="gap-header">Advanced rule not fully visualized <code>contains + minContains</code></div><div class="gap-line">The form preview cannot enforce this rule visually.</div><div class="gap-section"><div class="gap-label">What this rule means</div><div class="gap-meaning">At least 1 item(s) in &#x27;witnesses&#x27; must have idVerified = &#x27;True&#x27;.</div></div><div class="gap-section"><div class="gap-label">What the preview cannot show</div><div class="gap-limitation">The preview cannot check whether the items you enter here actually satisfy this rule.</div></div><div class="gap-section"><div class="gap-label">Conformance check</div><div class="conformance-note">Validated against the same JSON Schema Draft 2020-12 validator used to check your schema's syntax.</div><div class="conformance-pass">&#10003; An example that satisfies this rule was validated: <strong>PASS</strong>, as expected.</div><div class="conformance-fail">&#10003; An example that violates this rule was validated: <strong>FAIL</strong>, as expected.</div></div><div class="gap-footer"><span class="gap-enforced-badge">Stored &amp; validated</span>This rule will still be enforced by the Registry Service.</div></div><details class="raw-json-details"><summary>View raw JSON Schema for this field</summary><pre class="raw-json">{
+  &quot;type&quot;: &quot;array&quot;,
+  &quot;items&quot;: {
+    &quot;type&quot;: &quot;object&quot;,
+    &quot;properties&quot;: {
+      &quot;name&quot;: {
+        &quot;type&quot;: &quot;string&quot;
+      },
+      &quot;idVerified&quot;: {
+        &quot;type&quot;: &quot;boolean&quot;
+      }
+    }
+  },
+  &quot;contains&quot;: {
+    &quot;properties&quot;: {
+      &quot;idVerified&quot;: {
+        &quot;const&quot;: true
+      }
+    }
+  },
+  &quot;minContains&quot;: 1
+}</pre></details></div><div class="form-field"><label for="wasPreviouslyMarried">wasPreviouslyMarried <span class="required-marker">*</span></label><input type="checkbox" id="wasPreviouslyMarried" name="wasPreviouslyMarried"></div>
+    <div id="wasPreviouslyMarried__dependentSchema" class="dependent-schema-group" style="display:none"><div class="conditional-note">These additional fields apply because 'wasPreviouslyMarried' is filled in.</div><div class="form-field"><label for="wasPreviouslyMarried__dep.divorceDecreeNumber">divorceDecreeNumber</label><input type="text" id="wasPreviouslyMarried__dep.divorceDecreeNumber" name="wasPreviouslyMarried__dep.divorceDecreeNumber" ></div><div class="form-field"><label for="wasPreviouslyMarried__dep.deathCertificateNumber">deathCertificateNumber</label><input type="text" id="wasPreviouslyMarried__dep.deathCertificateNumber" name="wasPreviouslyMarried__dep.deathCertificateNumber" ></div></div>
+    <div class="dynamic-fields-group"><div class="group-label">Custom fields (name must match: ^note-)</div><div id="patternProps0__list"></div><div class="add-dynamic-field"><input type="text" id="patternProps0__nameInput" placeholder="field name"><button type="button" onclick="addDynamicField(0)">Add field</button></div><div id="patternProps0__error" class="dynamic-field-error"></div></div>
+    
+    <div class="completeness-ack"><label><input type="checkbox" id="completenessAck">I understand this preview doesn't fully show every rule above (see the "Needs review" sections) and confirm I've reviewed the explanations given.</label></div>
+    <button type="submit">Submit</button>
+  </form>
+  <div id="validationResult"></div>
+  
+  
+  <details class="raw-json-details"><summary>View the full raw JSON Schema (for technical users)</summary><pre class="raw-json">{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;additionalProperties&quot;: false,
+  &quot;properties&quot;: {
+    &quot;marriageType&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;enum&quot;: [
+        &quot;Religious&quot;,
+        &quot;Court&quot;
+      ]
+    },
+    &quot;bride&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: {
+        &quot;name&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;age&quot;: {
+          &quot;type&quot;: &quot;integer&quot;
+        },
+        &quot;nationality&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;iDProofType&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        }
+      },
+      &quot;required&quot;: [
+        &quot;name&quot;,
+        &quot;age&quot;,
+        &quot;nationality&quot;,
+        &quot;iDProofType&quot;
+      ]
+    },
+    &quot;groom&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: {
+        &quot;name&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;age&quot;: {
+          &quot;type&quot;: &quot;integer&quot;
+        },
+        &quot;nationality&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;iDProofType&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        }
+      },
+      &quot;required&quot;: [
+        &quot;name&quot;,
+        &quot;age&quot;,
+        &quot;nationality&quot;,
+        &quot;iDProofType&quot;
+      ]
+    },
+    &quot;proofOfAge&quot;: {
+      &quot;$ref&quot;: &quot;#/$defs/ProofOfAge&quot;
+    },
+    &quot;proofOfAge2&quot;: {
+      &quot;$ref&quot;: &quot;#/$defs/ProofOfAge&quot;
+    },
+    &quot;officiantSName&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;courtOrderNumber&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;witnesses&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;properties&quot;: {
+          &quot;name&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;idVerified&quot;: {
+            &quot;type&quot;: &quot;boolean&quot;
+          }
+        }
+      },
+      &quot;contains&quot;: {
+        &quot;properties&quot;: {
+          &quot;idVerified&quot;: {
+            &quot;const&quot;: true
+          }
+        }
+      },
+      &quot;minContains&quot;: 1
+    },
+    &quot;wasPreviouslyMarried&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;marriageType&quot;,
+    &quot;bride&quot;,
+    &quot;groom&quot;,
+    &quot;proofOfAge&quot;,
+    &quot;proofOfAge2&quot;,
+    &quot;witnesses&quot;,
+    &quot;wasPreviouslyMarried&quot;
+  ],
+  &quot;allOf&quot;: [
+    {
+      &quot;if&quot;: {
+        &quot;properties&quot;: {
+          &quot;marriageType&quot;: {
+            &quot;const&quot;: &quot;Religious&quot;
+          }
+        },
+        &quot;required&quot;: [
+          &quot;marriageType&quot;
+        ]
+      },
+      &quot;then&quot;: {
+        &quot;required&quot;: [
+          &quot;officiantSName&quot;
+        ]
+      }
+    },
+    {
+      &quot;if&quot;: {
+        &quot;properties&quot;: {
+          &quot;marriageType&quot;: {
+            &quot;const&quot;: &quot;Court&quot;
+          }
+        },
+        &quot;required&quot;: [
+          &quot;marriageType&quot;
+        ]
+      },
+      &quot;then&quot;: {
+        &quot;required&quot;: [
+          &quot;courtOrderNumber&quot;
+        ]
+      }
+    }
+  ],
+  &quot;dependentSchemas&quot;: {
+    &quot;wasPreviouslyMarried&quot;: {
+      &quot;properties&quot;: {
+        &quot;divorceDecreeNumber&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;deathCertificateNumber&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        }
+      },
+      &quot;required&quot;: []
+    }
+  },
+  &quot;patternProperties&quot;: {
+    &quot;^note-&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    }
+  },
+  &quot;$defs&quot;: {
+    &quot;ProofOfAge&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;oneOf&quot;: [
+        {
+          &quot;properties&quot;: {
+            &quot;birthCertificate&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            }
+          },
+          &quot;required&quot;: [
+            &quot;birthCertificate&quot;
+          ]
+        },
+        {
+          &quot;properties&quot;: {
+            &quot;passport&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            }
+          },
+          &quot;required&quot;: [
+            &quot;passport&quot;
+          ]
+        }
+      ]
+    }
+  }
+}</pre></details>
+  <script>
+    const VALIDATION_SCHEMA = [
+  {
+    "kind": "field",
+    "id": "marriageType",
+    "label": "marriageType",
+    "type": "string",
+    "required": true
+  },
+  {
+    "kind": "group",
+    "children": [
+      {
+        "kind": "field",
+        "id": "bride.name",
+        "label": "name",
+        "type": "string",
+        "required": true
+      },
+      {
+        "kind": "field",
+        "id": "bride.age",
+        "label": "age",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "kind": "field",
+        "id": "bride.nationality",
+        "label": "nationality",
+        "type": "string",
+        "required": true
+      },
+      {
+        "kind": "field",
+        "id": "bride.iDProofType",
+        "label": "iDProofType",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  {
+    "kind": "group",
+    "children": [
+      {
+        "kind": "field",
+        "id": "groom.name",
+        "label": "name",
+        "type": "string",
+        "required": true
+      },
+      {
+        "kind": "field",
+        "id": "groom.age",
+        "label": "age",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "kind": "field",
+        "id": "groom.nationality",
+        "label": "nationality",
+        "type": "string",
+        "required": true
+      },
+      {
+        "kind": "field",
+        "id": "groom.iDProofType",
+        "label": "iDProofType",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  {
+    "kind": "oneOf",
+    "radioName": "proofOfAge__choice",
+    "alternatives": [
+      {
+        "children": [
+          {
+            "kind": "field",
+            "id": "proofOfAge.alt0.birthCertificate",
+            "label": "birthCertificate",
+            "type": "string",
+            "required": true
+          }
+        ]
+      },
+      {
+        "children": [
+          {
+            "kind": "field",
+            "id": "proofOfAge.alt1.passport",
+            "label": "passport",
+            "type": "string",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "oneOf",
+    "radioName": "proofOfAge2__choice",
+    "alternatives": [
+      {
+        "children": [
+          {
+            "kind": "field",
+            "id": "proofOfAge2.alt0.birthCertificate",
+            "label": "birthCertificate",
+            "type": "string",
+            "required": true
+          }
+        ]
+      },
+      {
+        "children": [
+          {
+            "kind": "field",
+            "id": "proofOfAge2.alt1.passport",
+            "label": "passport",
+            "type": "string",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "field",
+    "id": "officiantSName",
+    "label": "officiantSName",
+    "type": "string",
+    "required": false
+  },
+  {
+    "kind": "field",
+    "id": "courtOrderNumber",
+    "label": "courtOrderNumber",
+    "type": "string",
+    "required": false
+  },
+  {
+    "kind": "field",
+    "id": "wasPreviouslyMarried",
+    "label": "wasPreviouslyMarried",
+    "type": "boolean",
+    "required": true
+  },
+  {
+    "kind": "dependentSchema",
+    "triggerId": "wasPreviouslyMarried",
+    "children": [
+      {
+        "kind": "field",
+        "id": "wasPreviouslyMarried__dep.divorceDecreeNumber",
+        "label": "divorceDecreeNumber",
+        "type": "string",
+        "required": false
+      },
+      {
+        "kind": "field",
+        "id": "wasPreviouslyMarried__dep.deathCertificateNumber",
+        "label": "deathCertificateNumber",
+        "type": "string",
+        "required": false
+      }
+    ]
+  }
+];
+    const CONDITIONALS = [
+  {
+    "triggerId": "marriageType",
+    "triggerValue": "Religious",
+    "thenRequired": [
+      "officiantSName"
+    ]
+  },
+  {
+    "triggerId": "marriageType",
+    "triggerValue": "Court",
+    "thenRequired": [
+      "courtOrderNumber"
+    ]
+  }
+];
+    const DEPENDENT_SCHEMA_TRIGGERS = ["wasPreviouslyMarried"];
+    const PATTERN_PROPERTIES = [
+  {
+    "index": 0,
+    "pattern": "^note-",
+    "valueSchema": {
+      "type": "string"
+    }
+  }
+];
+    const NEEDS_COMPLETENESS_ACK = true;
+    const dynamicFieldCounters = {};
+
+    function toggleOneOf(fieldId, chosenIndex, altCount) {
+      for (let i = 0; i < altCount; i++) {
+        const el = document.getElementById(fieldId + '__alt' + i);
+        if (el) el.style.display = (i === chosenIndex) ? 'block' : 'none';
+      }
+    }
+
+    function buildDynamicControl(fieldId, schema) {
+      if (schema.enum) {
+        let opts = '<option value="">-- choose --</option>';
+        schema.enum.forEach(function(v) { opts += '<option value="' + v + '">' + v + '</option>'; });
+        return '<select id="' + fieldId + '">' + opts + '</select>';
+      }
+      if (schema.type === 'boolean') return '<input type="checkbox" id="' + fieldId + '">';
+      if (schema.type === 'integer' || schema.type === 'number') return '<input type="number" id="' + fieldId + '">';
+      return '<input type="text" id="' + fieldId + '">';
+    }
+
+    function addDynamicField(groupIndex) {
+      const group = PATTERN_PROPERTIES[groupIndex];
+      const nameInput = document.getElementById('patternProps' + groupIndex + '__nameInput');
+      const errorDiv = document.getElementById('patternProps' + groupIndex + '__error');
+      const name = nameInput.value.trim();
+      errorDiv.textContent = '';
+      if (!name) { errorDiv.textContent = 'Enter a field name.'; return; }
+      if (!new RegExp(group.pattern).test(name)) {
+        errorDiv.textContent = "'" + name + "' doesn't match the required pattern: " + group.pattern;
+        return;
+      }
+      const list = document.getElementById('patternProps' + groupIndex + '__list');
+      const already = Array.prototype.slice.call(list.querySelectorAll('.dynamic-field-row'))
+        .some(function(row) { return row.dataset.fieldName === name; });
+      if (already) { errorDiv.textContent = "'" + name + "' has already been added."; return; }
+      const count = (dynamicFieldCounters[groupIndex] = (dynamicFieldCounters[groupIndex] || 0) + 1);
+      const fieldId = 'patternProps' + groupIndex + '__field' + count;
+      const row = document.createElement('div');
+      row.className = 'dynamic-field-row';
+      row.dataset.fieldName = name;
+      row.innerHTML = '<label>' + name + '</label>' + buildDynamicControl(fieldId, group.valueSchema) +
+        '<button type="button" onclick="this.parentElement.remove()">Remove</button>';
+      list.appendChild(row);
+      nameInput.value = '';
+    }
+
+    function validateDynamicFields(errors) {
+      PATTERN_PROPERTIES.forEach(function(group) {
+        const list = document.getElementById('patternProps' + group.index + '__list');
+        if (!list) return;
+        const rows = list.querySelectorAll('.dynamic-field-row');
+        rows.forEach(function(row) {
+          const label = row.dataset.fieldName;
+          const input = row.querySelector('input, select');
+          if (!input) return;
+          if (input.type === 'checkbox') return;
+          const raw = input.value;
+          if (raw === '') return;
+          const schema = group.valueSchema;
+          if (schema.type === 'integer' || schema.type === 'number') {
+            const num = Number(raw);
+            if (Number.isNaN(num)) { errors.push(label + ' must be a number.'); return; }
+            if (schema.minimum !== undefined && num < schema.minimum) {
+              errors.push(label + ' must be at least ' + schema.minimum + '.');
+            }
+            if (schema.maximum !== undefined && num > schema.maximum) {
+              errors.push(label + ' must be at most ' + schema.maximum + '.');
+            }
+            return;
+          }
+          if (schema.minLength !== undefined && raw.length < schema.minLength) {
+            errors.push(label + ' must be at least ' + schema.minLength + ' character(s).');
+          }
+          if (schema.maxLength !== undefined && raw.length > schema.maxLength) {
+            errors.push(label + ' must be at most ' + schema.maxLength + ' character(s).');
+          }
+          if (schema.pattern) {
+            const re = new RegExp(schema.pattern);
+            if (!re.test(raw)) {
+              errors.push(label + ' ' + (schema.patternHint || ('must match the required format: ' + schema.pattern)) + '.');
+            }
+          }
+        });
+      });
+    }
+
+    function isPresent(el) {
+      const val = el.type === 'checkbox' ? el.checked : el.value;
+      return val !== '' && val !== false;
+    }
+
+    function conditionallyRequiredIds() {
+      // Which fields are required *right now*, given the current value of whatever field
+      // triggers each conditional -- re-evaluated live as the user fills in the form, and again
+      // on Submit, so the rule is enforced for real rather than just described in a note.
+      const extra = new Set();
+      CONDITIONALS.forEach(function(cond) {
+        const el = document.getElementById(cond.triggerId);
+        if (!el) return;
+        // dependentRequired has no specific triggerValue -- any non-empty value satisfies it,
+        // unlike an if/then conditional which only fires on one exact match.
+        const satisfied = cond.presence ? isPresent(el) : String(el.value) === String(cond.triggerValue);
+        if (satisfied) {
+          cond.thenRequired.forEach(function(id) { extra.add(id); });
+        }
+      });
+      return extra;
+    }
+
+    function updateConditionalMarkers() {
+      const extra = conditionallyRequiredIds();
+      CONDITIONALS.forEach(function(cond) {
+        cond.thenRequired.forEach(function(id) {
+          const marker = document.getElementById(id + '__reqmarker');
+          if (marker) marker.style.display = extra.has(id) ? 'inline' : 'none';
+        });
+      });
+    }
+
+    function updateDependentSchemaVisibility() {
+      DEPENDENT_SCHEMA_TRIGGERS.forEach(function(triggerId) {
+        const el = document.getElementById(triggerId);
+        const group = document.getElementById(triggerId + '__dependentSchema');
+        if (!el || !group) return;
+        group.style.display = isPresent(el) ? 'block' : 'none';
+      });
+    }
+
+    function validateNode(node, errors, extraRequired) {
+      if (node.kind === 'group') {
+        node.children.forEach(function(child) { validateNode(child, errors, extraRequired); });
+        return;
+      }
+      if (node.kind === 'oneOf') {
+        const radios = document.getElementsByName(node.radioName);
+        let chosen = 0;
+        for (let i = 0; i < radios.length; i++) { if (radios[i].checked) { chosen = i; break; } }
+        const alt = node.alternatives[chosen];
+        if (alt) alt.children.forEach(function(child) { validateNode(child, errors, extraRequired); });
+        return;
+      }
+      if (node.kind === 'dependentSchema') {
+        const triggerEl = document.getElementById(node.triggerId);
+        if (triggerEl && isPresent(triggerEl)) {
+          node.children.forEach(function(child) { validateNode(child, errors, extraRequired); });
+        }
+        return;
+      }
+      if (node.kind !== 'field') return;
+      const el = document.getElementById(node.id);
+      if (!el) return;
+      const label = node.label;
+      if (node.type === 'boolean') return;
+      const raw = el.value;
+      const isRequired = node.required || extraRequired.has(node.id);
+      if (raw === '') {
+        if (isRequired) errors.push(label + ' is required.');
+        return;
+      }
+      if (node.type === 'integer' || node.type === 'number') {
+        const num = Number(raw);
+        if (Number.isNaN(num)) { errors.push(label + ' must be a number.'); return; }
+        if (node.type === 'integer' && !Number.isInteger(num)) {
+          errors.push(label + ' must be a whole number.'); return;
+        }
+        if (node.minimum !== undefined && num < node.minimum) {
+          errors.push(label + ' must be at least ' + node.minimum + '.');
+        }
+        if (node.maximum !== undefined && num > node.maximum) {
+          errors.push(label + ' must be at most ' + node.maximum + '.');
+        }
+        return;
+      }
+      if (node.minLength !== undefined && raw.length < node.minLength) {
+        errors.push(label + ' must be at least ' + node.minLength + ' character(s) (currently ' + raw.length + ').');
+      }
+      if (node.maxLength !== undefined && raw.length > node.maxLength) {
+        errors.push(label + ' must be at most ' + node.maxLength + ' character(s) (currently ' + raw.length + ').');
+      }
+      if (node.pattern) {
+        const re = new RegExp(node.pattern);
+        if (!re.test(raw)) {
+          errors.push(label + ' ' + (node.patternHint || ('must match the required format: ' + node.pattern)) + '.');
+        }
+      }
+      if (node.notPattern && new RegExp(node.notPattern).test(raw)) {
+        errors.push(label + ' must not match the pattern: ' + node.notPattern + '.');
+      }
+      if (node.notConst !== undefined && String(node.notConst) === raw) {
+        errors.push(label + " must not be exactly '" + node.notConst + "'.");
+      }
+      if (node.notEnum && node.notEnum.some(function(v) { return String(v) === raw; })) {
+        errors.push(label + ' must not be one of the banned values.');
+      }
+    }
+
+    const previewForm = document.getElementById('schemaPreviewForm');
+    previewForm.addEventListener('input', updateConditionalMarkers);
+    previewForm.addEventListener('change', updateConditionalMarkers);
+    previewForm.addEventListener('input', updateDependentSchemaVisibility);
+    previewForm.addEventListener('change', updateDependentSchemaVisibility);
+    updateConditionalMarkers();
+    updateDependentSchemaVisibility();
+
+    previewForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      const result = document.getElementById('validationResult');
+      if (NEEDS_COMPLETENESS_ACK) {
+        const ack = document.getElementById('completenessAck');
+        if (!ack || !ack.checked) {
+          result.innerHTML = '<div class="validation-errors"><b>This would not be accepted:</b><ul>' +
+            '<li>Please acknowledge the preview limitations above before continuing.</li></ul></div>';
+          return;
+        }
+      }
+      const errors = [];
+      const extraRequired = conditionallyRequiredIds();
+      VALIDATION_SCHEMA.forEach(function(node) { validateNode(node, errors, extraRequired); });
+      validateDynamicFields(errors);
+      if (errors.length) {
+        result.innerHTML = '<div class="validation-errors"><b>This would not be accepted:</b><ul>' +
+          errors.map(function(msg) { return '<li>' + msg + '</li>'; }).join('') + '</ul></div>';
+      } else {
+        result.innerHTML = '<div class="validation-ok">This record would be accepted.</div>';
+      }
+    });
+  </script>
+</body>
+</html>

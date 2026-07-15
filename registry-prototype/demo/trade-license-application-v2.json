@@ -1,0 +1,219 @@
+{
+  "schemaCode": "trade-license-application-v2",
+  "definition": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "applicantId": {
+        "type": "string"
+      },
+      "applicantType": {
+        "type": "string",
+        "enum": [
+          "Individual",
+          "Company"
+        ]
+      },
+      "aadhaarNumber": {
+        "type": "string",
+        "pattern": "^[0-9]{12}$"
+      },
+      "companyRegistrationNumber": {
+        "type": "string"
+      },
+      "tradeType": {
+        "type": "string",
+        "enum": [
+          "Retail",
+          "Wholesale",
+          "Manufacturing"
+        ]
+      },
+      "username": {
+        "type": "string",
+        "not": {
+          "const": "admin"
+        }
+      },
+      "address": {
+        "$ref": "#/$defs/Address"
+      },
+      "billingAddress": {
+        "$ref": "#/$defs/Address"
+      },
+      "contactMethod": {
+        "anyOf": [
+          {
+            "properties": {
+              "email": {
+                "type": "string",
+                "format": "email"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          },
+          {
+            "properties": {
+              "phone": {
+                "type": "string",
+                "pattern": "^[0-9]{10}$"
+              }
+            },
+            "required": [
+              "phone"
+            ]
+          }
+        ]
+      },
+      "documents": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "docType": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "APPROVED",
+                "PENDING",
+                "REJECTED"
+              ]
+            }
+          }
+        },
+        "contains": {
+          "properties": {
+            "status": {
+              "const": "APPROVED"
+            }
+          }
+        },
+        "minContains": 1
+      },
+      "customFields": {
+        "type": "object",
+        "properties": {},
+        "propertyNames": {
+          "pattern": "^[0-9]{3}$"
+        },
+        "patternProperties": {
+          "^[0-9]{3}$": {
+            "type": "string"
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "promoCode": {
+        "type": "string"
+      },
+      "promoApprovalId": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "applicantId",
+      "applicantType",
+      "tradeType",
+      "username",
+      "address"
+    ],
+    "allOf": [
+      {
+        "if": {
+          "properties": {
+            "applicantType": {
+              "const": "Individual"
+            }
+          },
+          "required": [
+            "applicantType"
+          ]
+        },
+        "then": {
+          "required": [
+            "aadhaarNumber"
+          ]
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "applicantType": {
+              "const": "Company"
+            }
+          },
+          "required": [
+            "applicantType"
+          ]
+        },
+        "then": {
+          "required": [
+            "companyRegistrationNumber"
+          ]
+        }
+      }
+    ],
+    "dependentRequired": {
+      "promoCode": [
+        "promoApprovalId"
+      ]
+    },
+    "patternProperties": {
+      "^x-[a-z]+$": {
+        "type": "string"
+      }
+    },
+    "$defs": {
+      "Address": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "pincode": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$"
+          },
+          "geoLocation": {
+            "type": "object",
+            "properties": {
+              "latitude": {
+                "type": "number",
+                "minimum": -90,
+                "maximum": 90
+              },
+              "longitude": {
+                "type": "number",
+                "minimum": -180,
+                "maximum": 180
+              }
+            },
+            "required": [
+              "latitude",
+              "longitude"
+            ]
+          }
+        },
+        "required": [
+          "city"
+        ]
+      }
+    }
+  },
+  "x-unique": [
+    [
+      "applicantId"
+    ]
+  ],
+  "x-indexes": [
+    {
+      "fieldPath": "tradeType",
+      "method": "btree"
+    }
+  ]
+}

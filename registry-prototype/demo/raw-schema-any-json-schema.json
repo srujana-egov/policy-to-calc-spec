@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "recordId": {
+      "type": "string"
+    },
+    "employment": {
+      "type": "object",
+      "properties": {
+        "employer": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "registeredOffice": {
+              "type": "object",
+              "properties": {
+                "pincode": {
+                  "type": "string",
+                  "pattern": "^[0-9]{6}$"
+                }
+              },
+              "required": [
+                "pincode"
+              ]
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      }
+    },
+    "coordinates": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "integer",
+          "description": "altitude in meters"
+        }
+      ]
+    },
+    "creditCardNumber": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "recordId"
+  ],
+  "dependentSchemas": {
+    "creditCardNumber": {
+      "properties": {
+        "cvv": {
+          "type": "string",
+          "pattern": "^[0-9]{3}$"
+        },
+        "expiryDate": {
+          "type": "string",
+          "format": "date"
+        }
+      },
+      "required": [
+        "cvv"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "not": {
+          "required": [
+            "recordId"
+          ]
+        }
+      },
+      "then": {
+        "required": [
+          "recordId"
+        ]
+      }
+    }
+  ]
+}
