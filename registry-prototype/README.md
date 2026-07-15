@@ -1,5 +1,43 @@
 # Registry configuration prototype
 
+## The flow, in plain terms
+
+Run `python3 wizard.py` and this happens:
+
+1. **Pick how to describe the schema** — type `describe` (say what you want in plain English, an
+   AI drafts it) or `wizard` (answer one guided question at a time). Either choice leads to the
+   exact same steps below.
+2. **A draft gets built** — either the AI, or you answering questions, calls a set of safe,
+   pre-built "add a field"/"add a rule" functions one at a time. Neither the AI nor anything else
+   ever writes the schema's JSON by hand.
+3. **It gets checked twice** — once for "does this make logical sense" (every required field
+   actually exists, a pattern is only on a text field, etc.), and once against the real, official
+   JSON Schema rules.
+4. **It gets rendered as a real, clickable preview** — an actual form you can fill out and click
+   around in, not just a description of one. Anything the preview genuinely can't show gets an
+   honest explanation plus a real pass/fail test proving how it actually behaves.
+5. **You're asked "does this look right?"** If not, just describe what's wrong in plain English
+   (or pick a specific fix from a menu) — nothing restarts from scratch.
+6. **Once you confirm**, it's sent to the real DIGIT server (or, if you're not pointed at one,
+   it prints exactly what *would* have been sent).
+7. **Optionally**, you're asked to add actual data records now — a simpler, separate flow.
+
+## What each file does, in one line
+
+| File | What it does |
+|---|---|
+| `models.py` | The rulebook: what a valid field looks like, what a valid whole schema looks like. |
+| `builder.py` | Actually builds a schema, one field/rule at a time — used identically whether a human or the AI is driving it. |
+| `validate.py` | Proofreads the built schema for mistakes before it's shown or sent anywhere. |
+| `render.py` | Draws the real, interactive preview page you click around in. |
+| `conformance.py` | For anything the preview can't visually show, builds a real pass/fail test and proves it, instead of just describing it. |
+| `llm_schema_draft.py` | Talks to the AI — drafts from your description, double-checks the draft, and applies your plain-English fixes. |
+| `wizard.py` | The conductor — runs the whole flow above, start to finish. This is what you actually run. |
+| `data_entry.py` | Phase 2 — asks for actual data values field by field, once a schema already exists. |
+| `add_data.py` | A shortcut into Phase 2 for a schema that's already live on the server (skips authoring entirely). |
+
+---
+
 Step 2 of the config pipeline (see `../DEMO-2026-07-15.md`) — authors a DIGIT Registry schema for
 **any JSON Schema Draft 2020-12 construct**, not a bounded subset, then a second phase that enters
 data records against it. Two ways to author a schema, both ending at the same interactive preview:
