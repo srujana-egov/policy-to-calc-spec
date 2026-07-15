@@ -22,6 +22,52 @@ Run `python3 wizard.py` and this happens:
    it prints exactly what *would* have been sent).
 7. **Optionally**, you're asked to add actual data records now — a simpler, separate flow.
 
+```mermaid
+flowchart TD
+    start(["python3 wizard.py"])
+    choice{"describe or wizard?"}
+    describe["AI drafts from your<br/>plain-English description"]
+    guided["You answer guided<br/>questions one at a time"]
+    build["Draft built via SchemaBuilder<br/>(same functions, either way)"]
+    checks["Checked twice:<br/>logical-sense + real JSON Schema rules"]
+    errors{"Any errors?"}
+    preview["Rendered as a real,<br/>clickable interactive preview"]
+    confirm{"Does this look right?"}
+    fix["Fix it -- plain English,<br/>or pick from a menu"]
+    write["Written to the real DIGIT server<br/>(or a labeled dry run)"]
+    dataAsk{"Add data records now?"}
+    dataEntry["Phase 2: enter data<br/>field by field, record by record"]
+    finish(["Done"])
+
+    start --> choice
+    choice -->|describe| describe
+    choice -->|wizard| guided
+    describe --> build
+    guided --> build
+    build --> checks
+    checks --> errors
+    errors -->|yes| fix
+    errors -->|no| preview
+    preview --> confirm
+    confirm -->|no| fix
+    confirm -->|yes| write
+    fix --> checks
+    write --> dataAsk
+    dataAsk -->|yes| dataEntry
+    dataAsk -->|no| finish
+    dataEntry --> finish
+
+    classDef startend fill:#e0e0e0,stroke:#666,color:#1a1a1a
+    classDef decision fill:#fff3cd,stroke:#b5891f,color:#1a1a1a
+    classDef action fill:#cfe3fb,stroke:#1b4d89,color:#1a1a1a
+    classDef fixnode fill:#fde9d9,stroke:#b56a1f,color:#1a1a1a
+
+    class start,finish startend
+    class choice,errors,confirm,dataAsk decision
+    class describe,guided,build,checks,preview,write,dataEntry action
+    class fix fixnode
+```
+
 ## What each file does, in one line
 
 | File | What it does |
