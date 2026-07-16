@@ -555,7 +555,11 @@ def _render_dependent_schema_group(trigger_field: str, properties: dict, require
                       field_confidence=field_confidence, defs=defs)
         for sub_name, sub_prop in properties.items())
     note = f"These additional fields apply because '{html.escape(trigger_field)}' is filled in."
-    return (f'<div id="{trigger_field}__dependentSchema" class="dependent-schema-group" style="display:none">'
+    # trigger_field is a raw property name here (needed unescaped just above, for id_prefix -- it
+    # has to match the unescaped ids _build_validation_node/_render_field build elsewhere); only
+    # this attribute-embedding use needs its own escaped copy.
+    trigger_field_attr = html.escape(trigger_field, quote=True)
+    return (f'<div id="{trigger_field_attr}__dependentSchema" class="dependent-schema-group" style="display:none">'
             f'<div class="conditional-note">{note}</div>{inner}</div>')
 
 
@@ -892,6 +896,12 @@ def _render_completeness_summary(completeness: dict) -> str:
 
 
 def _control_html(field_id: str, prop: dict) -> str:
+    # field_id lands raw in id=/name= attributes below -- it's built from a property name, which
+    # can be anything a free-text LLM drafting session's add_raw_property/define_reusable_schema
+    # tools produce, not just the wizard's own controlled vocabulary. Escaped once here (this
+    # function only ever uses field_id for HTML-attribute embedding, never for a dict lookup or
+    # recursive id_prefix), same principle as `label` in _render_field.
+    field_id = html.escape(field_id, quote=True)
     type_ = prop.get("type")
     enum = prop.get("enum")
     if enum:
@@ -936,6 +946,15 @@ def _render_one_of(field_id: str, label: str, required_marker: str, assumed_clas
     alternatives = prop.get("oneOf") or prop.get("anyOf") or []
     options_html = []
     panels_html = []
+    # field_id is a raw property name/path (needed unescaped below, where it's used as the
+    # id_prefix for a recursive _render_field call -- that has to match the unescaped ids
+    # _build_validation_node builds separately for the JS validator to look up). Every place it's
+    # embedded directly into HTML source here instead needs its own escaped copy: once for a plain
+    # attribute value, and once JSON-encoded-then-HTML-escaped for the onchange handler, since that
+    # string has to survive both HTML-attribute parsing and, after the browser decodes it, JS
+    # string-literal parsing.
+    field_id_attr = html.escape(field_id, quote=True)
+    field_id_js = html.escape(json.dumps(field_id))
     for i, alt in enumerate(alternatives):
         if not isinstance(alt, dict):
             # A bare true/false alternative (legal but bizarre JSON Schema) -- no sub-fields to
@@ -946,13 +965,13 @@ def _render_one_of(field_id: str, label: str, required_marker: str, assumed_clas
             alt_label = f"Option {i + 1}"
             checked = " checked" if i == 0 else ""
             options_html.append(
-                f'<label class="oneof-option"><input type="radio" name="{field_id}__choice" value="{i}"{checked} '
-                f"onchange=\"toggleOneOf('{field_id}', {i}, {len(alternatives)})\"> {alt_label}</label>")
+                f'<label class="oneof-option"><input type="radio" name="{field_id_attr}__choice" value="{i}"{checked} '
+                f'onchange="toggleOneOf({field_id_js}, {i}, {len(alternatives)})"> {alt_label}</label>')
             display = "block" if i == 0 else "none"
             alt_gap = {**_explain_advanced_construct(alt, field_name=name),
                        "conformance": conformance.probe_gap(alt)}
             panels_html.append(
-                f'<div id="{field_id}__alt{i}" class="oneof-alt" style="display:{display}">'
+                f'<div id="{field_id_attr}__alt{i}" class="oneof-alt" style="display:{display}">'
                 f'{_render_gap_panel(alt_gap)}'
                 f'<details class="raw-json-details"><summary>View raw JSON Schema for this alternative</summary>'
                 f'<pre class="raw-json">{html.escape(json.dumps(alt))}</pre></details></div>')
@@ -960,8 +979,8 @@ def _render_one_of(field_id: str, label: str, required_marker: str, assumed_clas
         alt_label = _oneof_alt_label(alt, i)
         checked = " checked" if i == 0 else ""
         options_html.append(
-            f'<label class="oneof-option"><input type="radio" name="{field_id}__choice" value="{i}"{checked} '
-            f"onchange=\"toggleOneOf('{field_id}', {i}, {len(alternatives)})\"> {alt_label}</label>")
+            f'<label class="oneof-option"><input type="radio" name="{field_id_attr}__choice" value="{i}"{checked} '
+            f'onchange="toggleOneOf({field_id_js}, {i}, {len(alternatives)})"> {alt_label}</label>')
         display = "block" if i == 0 else "none"
         alt_required = set(alt.get("required") or [])
         inner = "".join(
@@ -969,7 +988,7 @@ def _render_one_of(field_id: str, label: str, required_marker: str, assumed_clas
                           field_confidence=field_confidence, conditional_notes=conditional_notes,
                           defs=defs, ref_chain=ref_chain)
             for sub_name, sub_prop in alt.get("properties", {}).items())
-        panels_html.append(f'<div id="{field_id}__alt{i}" class="oneof-alt" style="display:{display}">{inner}</div>')
+        panels_html.append(f'<div id="{field_id_attr}__alt{i}" class="oneof-alt" style="display:{display}">{inner}</div>')
 
     return (f'<div class="form-field oneof-group{assumed_class}">'
             f'<label>{label}{required_marker}{assumed_badge}</label>'
@@ -983,6 +1002,13 @@ def _render_field(name: str, prop: dict, required_here: bool, id_prefix: str = "
                    field_confidence: dict | None = None, conditional_notes: dict | None = None,
                    defs: dict | None = None, ref_chain: tuple = ()) -> str:
     field_id = f"{id_prefix}{name}"
+    # field_id stays raw throughout this function -- it's a dict key (conditional_notes/
+    # field_confidence lookups below) and the id_prefix for recursive calls, both of which must
+    # match the unescaped ids _build_validation_node builds separately for the JS validator. Only
+    # the two places it's embedded directly as HTML source (the required-marker span id, and the
+    # label's for=) get an escaped copy -- everywhere else, _control_html/_render_one_of/
+    # _render_dependent_schema_group each escape it themselves at the point they emit HTML.
+    field_id_attr = html.escape(field_id, quote=True)
     label = html.escape(name)
 
     if not isinstance(prop, dict):
@@ -1037,7 +1063,7 @@ def _render_field(name: str, prop: dict, required_here: bool, id_prefix: str = "
         # A toggleable span (not a plain string) so the embedded JS can flip it live as the
         # user changes the triggering field -- e.g. watching "required" appear/disappear as they
         # pick a different applicant type -- rather than only being told about the rule in prose.
-        required_marker = (f' <span id="{field_id}__reqmarker" class="required-marker" '
+        required_marker = (f' <span id="{field_id_attr}__reqmarker" class="required-marker" '
                             f'style="display:{"inline" if required_here else "none"}">*</span>')
         help_html += "".join(f'<div class="conditional-note">{n}</div>' for n in notes)
     else:
@@ -1075,8 +1101,63 @@ def _render_field(name: str, prop: dict, required_here: bool, id_prefix: str = "
                 f'{help_html}{inner}</fieldset>')
 
     return (f'<div class="form-field{assumed_class}">'
-            f'<label for="{field_id}">{label}{required_marker}{assumed_badge}</label>'
+            f'<label for="{field_id_attr}">{label}{required_marker}{assumed_badge}</label>'
             f'{_control_html(field_id, prop)}{help_html}</div>')
+
+
+def _json_for_script(value, **kwargs) -> str:
+    """json.dumps, but safe to embed directly inside a <script> block: a string value anywhere in
+    `value` (a field name, a pattern, a description -- any of which can come from a free-text LLM
+    drafting session, not just this project's own controlled vocabulary) could contain a literal
+    '</script>', which would close the surrounding tag early and let whatever follows execute as a
+    new, real <script> element. JSON/JS strings never need a literal, unescaped '/' -- '\\/' decodes
+    to the exact same '/' character -- so replacing every '</' with '<\\/' defeats the browser's
+    HTML tokenizer without changing any decoded value at all. The standard fix for this class of
+    bug (see OWASP's guidance on embedding JSON in HTML)."""
+    return json.dumps(value, **kwargs).replace("</", "<\\/")
+
+
+def _render_raw_json_fallback_page(schema_code: str, definition, out_path: str, reason: str) -> str:
+    """Whole-page 'can't show this as an interactive form' fallback -- used both for a top-level
+    shape this project's field-by-field form model can't represent (an array or bare-value schema)
+    and for a schema nested too deep for the recursive renderer to walk at all (see the
+    RecursionError guard in render_schema_form_preview below). Strips $schema and collapses behind
+    a <details> toggle -- the same two protections every other raw-JSON view in this file applies
+    (the offline-safety leak this exact fallback allowed, before those two protections existed, was
+    found by an earlier adversarial review: a non-object top-level schema carrying its own $schema
+    URI landed in an always-visible <pre>, the only raw-JSON dump in the file that skipped both)."""
+    definition_for_raw = ({k: v for k, v in definition.items() if k != "$schema"}
+                           if isinstance(definition, dict) else definition)
+    try:
+        raw = (json.dumps(definition_for_raw, indent=2) if isinstance(definition_for_raw, (dict, list))
+               else json.dumps(definition_for_raw))
+        raw_json_html = ('<details class="raw-json-details" open><summary>View raw JSON Schema</summary>'
+                          f'<pre class="raw-json">{html.escape(raw)}</pre></details>')
+    except RecursionError:
+        # json.dumps recurses once per nesting level too -- a schema deep enough to exceed the
+        # interactive renderer's own recursion budget (the very case this fallback exists for) can
+        # just as easily exceed this dump's. There's no shallower way left to show it, so this is
+        # the last, honest degradation: say so in plain text instead of raising a second, unhandled
+        # RecursionError while trying to explain the first one.
+        raw_json_html = ('<div class="raw-json-note">This schema is nested too deeply to display, '
+                          'even as raw JSON.</div>')
+    html_doc = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Form preview -- {html.escape(schema_code)}</title>
+<style>{_STYLE}</style>
+</head>
+<body>
+  <h1>{html.escape(schema_code)}</h1>
+  <div class="subtitle">{html.escape(reason)}</div>
+  {raw_json_html}
+</body>
+</html>
+"""
+    with open(out_path, "w") as f:
+        f.write(html_doc)
+    return out_path
 
 
 def render_schema_form_preview(schema_code: str, definition: dict, x_unique: list | None,
@@ -1101,63 +1182,54 @@ def render_schema_form_preview(schema_code: str, definition: dict, x_unique: lis
     to a whole-page raw-JSON note rather than silently rendering an empty, misleadingly-blank
     form."""
     if not isinstance(definition, dict) or definition.get("type") not in (None, "object"):
-        # Strip $schema before dumping and collapse behind a <details> toggle -- the exact same
-        # two protections the main render path applies to its own raw-JSON views (the offline-
-        # safety leak this exact gap allowed was found by adversarial review: a non-object
-        # top-level schema carrying its own $schema URI landed in an always-visible <pre>, the
-        # only raw-JSON dump in this file that skipped both safeguards).
-        definition_for_raw = ({k: v for k, v in definition.items() if k != "$schema"}
-                               if isinstance(definition, dict) else definition)
-        raw = (json.dumps(definition_for_raw, indent=2) if isinstance(definition_for_raw, (dict, list))
-               else json.dumps(definition_for_raw))
-        html_doc = f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Form preview -- {html.escape(schema_code)}</title>
-<style>{_STYLE}</style>
-</head>
-<body>
-  <h1>{html.escape(schema_code)}</h1>
-  <div class="subtitle">This schema's top-level shape isn't a field-by-field object form (e.g. an array or a bare value) -- not shown as an interactive form yet.</div>
-  <details class="raw-json-details" open><summary>View raw JSON Schema</summary>
-  <pre class="raw-json">{html.escape(raw)}</pre></details>
-</body>
-</html>
-"""
-        with open(out_path, "w") as f:
-            f.write(html_doc)
-        return out_path
+        return _render_raw_json_fallback_page(
+            schema_code, definition, out_path,
+            "This schema's top-level shape isn't a field-by-field object form (e.g. an array or a "
+            "bare value) -- not shown as an interactive form yet.")
 
     properties = definition.get("properties", {})
     required = set(definition.get("required") or [])
     defs = definition.get("$defs") or definition.get("definitions") or {}
-    conditional_notes = _build_conditional_notes(definition)
-    conditional_specs = _build_conditional_specs(definition)
-    fields_html = "".join(
-        _render_field(name, prop, name in required, field_confidence=field_confidence,
-                      conditional_notes=conditional_notes, defs=defs)
-        for name, prop in properties.items())
-    dependent_schema_html = "".join(
-        _render_dependent_schema_group(trigger_field, dep_properties, dep_required, field_confidence, defs)
-        for trigger_field, dep_properties, dep_required in _iter_dependent_schemas(definition))
-    dependent_schema_triggers = [trigger_field for trigger_field, _, _ in _iter_dependent_schemas(definition)]
-    pattern_properties_specs = _build_pattern_properties_specs(definition)
-    pattern_properties_html = "".join(_render_pattern_properties_group(spec) for spec in pattern_properties_specs)
-    # _scan_schema_level_gaps (e.g. an allOf block that doesn't match a recognized if/then shape)
-    # was already counted in the completeness score, but an adversarial review found nothing ever
-    # actually rendered these gaps anywhere on the page -- the score dropped below 100% with no
-    # visible "Needs review" panel to explain why, the exact silent-gap failure mode this whole
-    # feature exists to prevent.
-    schema_level_gaps_html = "".join(
-        f'<div class="form-field unsupported"><label>Schema-level rule</label>{_render_gap_panel(gap)}</div>'
-        for gap in _scan_schema_level_gaps(definition))
-    validation_tree = [
-        node for name, prop in properties.items()
-        if (node := _build_validation_node(name, prop, name in required, defs=defs)) is not None
-    ]
-    validation_tree.extend(_build_dependent_schema_validation_nodes(definition, defs))
-    completeness = _compute_preview_completeness(definition, defs)
+    # Every step below walks the schema's own nesting depth recursively (field rendering, gap
+    # scanning, completeness counting, validation-tree building all mirror each other's traversal --
+    # see their own docstrings). add_raw_property/define_reusable_schema explicitly support
+    # "arbitrary depth," per this project's own README, but Python's call stack doesn't: a schema
+    # nested deep enough (confirmed at ~1000+ levels) blows past the default recursion limit and
+    # raises RecursionError. Falling back to the same raw-JSON page used for a top-level shape this
+    # renderer can't represent is consistent with this feature's whole "never crash, always degrade
+    # honestly" philosophy -- a hard-to-reach corner case shouldn't kill the whole CLI session.
+    try:
+        conditional_notes = _build_conditional_notes(definition)
+        conditional_specs = _build_conditional_specs(definition)
+        fields_html = "".join(
+            _render_field(name, prop, name in required, field_confidence=field_confidence,
+                          conditional_notes=conditional_notes, defs=defs)
+            for name, prop in properties.items())
+        dependent_schema_html = "".join(
+            _render_dependent_schema_group(trigger_field, dep_properties, dep_required, field_confidence, defs)
+            for trigger_field, dep_properties, dep_required in _iter_dependent_schemas(definition))
+        dependent_schema_triggers = [trigger_field for trigger_field, _, _ in _iter_dependent_schemas(definition)]
+        pattern_properties_specs = _build_pattern_properties_specs(definition)
+        pattern_properties_html = "".join(_render_pattern_properties_group(spec) for spec in pattern_properties_specs)
+        # _scan_schema_level_gaps (e.g. an allOf block that doesn't match a recognized if/then shape)
+        # was already counted in the completeness score, but an adversarial review found nothing ever
+        # actually rendered these gaps anywhere on the page -- the score dropped below 100% with no
+        # visible "Needs review" panel to explain why, the exact silent-gap failure mode this whole
+        # feature exists to prevent.
+        schema_level_gaps_html = "".join(
+            f'<div class="form-field unsupported"><label>Schema-level rule</label>{_render_gap_panel(gap)}</div>'
+            for gap in _scan_schema_level_gaps(definition))
+        validation_tree = [
+            node for name, prop in properties.items()
+            if (node := _build_validation_node(name, prop, name in required, defs=defs)) is not None
+        ]
+        validation_tree.extend(_build_dependent_schema_validation_nodes(definition, defs))
+        completeness = _compute_preview_completeness(definition, defs)
+    except RecursionError:
+        return _render_raw_json_fallback_page(
+            schema_code, definition, out_path,
+            "This schema is nested too deeply to render as an interactive form -- not shown as a "
+            "form preview, but it will still be validated and enforced by the Registry Service.")
     completeness_html = _render_completeness_summary(completeness)
     needs_ack = completeness["percent"] < 100
     ack_html = (
@@ -1210,11 +1282,11 @@ def render_schema_form_preview(schema_code: str, definition: dict, x_unique: lis
   {index_html}
   {raw_schema_toggle_html}
   <script>
-    const VALIDATION_SCHEMA = {json.dumps(validation_tree, indent=2)};
-    const CONDITIONALS = {json.dumps(conditional_specs, indent=2)};
-    const DEPENDENT_SCHEMA_TRIGGERS = {json.dumps(dependent_schema_triggers)};
-    const PATTERN_PROPERTIES = {json.dumps(pattern_properties_specs, indent=2)};
-    const NEEDS_COMPLETENESS_ACK = {json.dumps(needs_ack)};
+    const VALIDATION_SCHEMA = {_json_for_script(validation_tree, indent=2)};
+    const CONDITIONALS = {_json_for_script(conditional_specs, indent=2)};
+    const DEPENDENT_SCHEMA_TRIGGERS = {_json_for_script(dependent_schema_triggers)};
+    const PATTERN_PROPERTIES = {_json_for_script(pattern_properties_specs, indent=2)};
+    const NEEDS_COMPLETENESS_ACK = {_json_for_script(needs_ack)};
     const dynamicFieldCounters = {{}};
 
     function toggleOneOf(fieldId, chosenIndex, altCount) {{
@@ -1460,21 +1532,21 @@ def _format_cell_value(value) -> str:
 
 def render_data_preview(schema: SchemaRequest, records: list[dict], out_path: str) -> str:
     field_names = list(schema.definition.properties.keys())
-    header = "".join(f"<th>{name}</th>" for name in field_names)
+    header = "".join(f"<th>{html.escape(name)}</th>" for name in field_names)
     body_rows = []
     for i, record in enumerate(records, start=1):
-        cells = "".join(f"<td>{_format_cell_value(record.get(name))}</td>" for name in field_names)
+        cells = "".join(f"<td>{html.escape(_format_cell_value(record.get(name)))}</td>" for name in field_names)
         body_rows.append(f"<tr><td>{i}</td>{cells}</tr>")
 
     html_doc = f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>Data preview -- {schema.schemaCode}</title>
+<title>Data preview -- {html.escape(schema.schemaCode)}</title>
 <style>{_STYLE}</style>
 </head>
 <body>
-  <h1>{schema.schemaCode} -- new records</h1>
+  <h1>{html.escape(schema.schemaCode)} -- new records</h1>
   <div class="subtitle">{len(records)} record(s) about to be created.</div>
   <table>
     <tr><th>#</th>{header}</tr>

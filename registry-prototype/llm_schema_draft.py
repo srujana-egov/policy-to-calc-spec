@@ -542,6 +542,51 @@ def _execute_tool_call(builder: SchemaBuilder, confidence: dict, name: str, args
         return {"error": f"unknown tool '{name}'"}
     except ValueError as e:
         return {"error": str(e)}
+    except KeyError as e:
+        # A real gap found by an adversarial review: the model omitting a required argument (e.g.
+        # calling add_field with no "type") raises KeyError on the args["..."] lookups above, which
+        # this handler didn't cover before -- crashing the whole drafting/fixing session instead of
+        # surfacing a tool error the model could react to, exactly like a validation ValueError
+        # already does. Confirmed by direct reproduction: _execute_tool_call(b, {}, 'add_field',
+        # {'label': 'Name'}) (missing 'type') raised uncaught.
+        return {"error": f"missing required argument {e} for tool '{name}'"}
+    except TypeError as e:
+        # Same reasoning as KeyError just above, for the other predictable shape of a malformed
+        # tool call: an argument present but the wrong type (e.g. a string where add_unique_constraint
+        # expects a list of field names), which can raise TypeError inside the builder method it's
+        # passed to rather than at the args["..."] lookup itself.
+        return {"error": f"invalid arguments for tool '{name}': {e}"}
+    except Exception as e:
+        # A second adversarial review found this boundary was still incomplete after the two
+        # handlers above: ValueError/KeyError/TypeError only cover the specific shapes anticipated
+        # at the time, and enumerating exception types one at a time as new ones turn up is
+        # provably a losing game -- a systematic audit across all 15 tools found the same
+        # underlying mistake (a non-string "label" reaching camel_field_name()'s unconditional
+        # .strip() call, and a parent field stored as a raw dict rather than a PropertyDef reaching
+        # a plain ".type" attribute access) surfacing as AttributeError in add_field,
+        # add_nested_field, add_one_of_field, add_ref_field, and add_raw_property alike. This
+        # function's entire contract is "never let a malformed tool call escape as a crash" --
+        # every builder method it calls is already covered by this project's own direct tests
+        # (test_schema_builder.py) against well-formed input, so a bug surfacing HERE always means
+        # the arguments were shaped wrong, not that the builder itself is broken. A bare
+        # except Exception is the right scope for that contract, not scope creep: it's the only
+        # way to make the "no other error type could still be waiting to be found" property
+        # actually true, rather than an ever-growing, never-provably-complete list.
+        return {"error": f"tool '{name}' failed unexpectedly with malformed arguments: {e}"}
+
+
+def _run_tool_call(builder: SchemaBuilder, confidence: dict, call) -> dict:
+    """Parses one model tool call's arguments and executes it, translating a malformed arguments
+    string into the same kind of {"error": ...} dict _execute_tool_call already returns for a
+    malformed-but-parseable call -- so the model sees a reactable tool error either way, instead of
+    an uncaught json.JSONDecodeError crashing the whole session. Shared by
+    draft_schema_from_description and apply_fix_from_description, which otherwise ran this same two
+    -step parse-then-execute logic independently."""
+    try:
+        args = json.loads(call.function.arguments)
+    except json.JSONDecodeError as e:
+        return {"error": f"your last tool call's arguments weren't valid JSON: {e}"}
+    return _execute_tool_call(builder, confidence, call.function.name, args)
 
 
 def draft_schema_from_description(schema_code: str, description: str, model: str = "gpt-4o",
@@ -585,8 +630,7 @@ def draft_schema_from_description(schema_code: str, description: str, model: str
             break
 
         for call in message.tool_calls:
-            args = json.loads(call.function.arguments)
-            result = _execute_tool_call(builder, confidence, call.function.name, args)
+            result = _run_tool_call(builder, confidence, call)
             messages.append({"role": "tool", "tool_call_id": call.id, "content": json.dumps(result)})
     else:
         print(f"  (stopped after {max_rounds} rounds -- draft may be incomplete)")
@@ -649,8 +693,7 @@ def apply_fix_from_description(builder: SchemaBuilder, feedback: str, model: str
             break
 
         for call in message.tool_calls:
-            args = json.loads(call.function.arguments)
-            result = _execute_tool_call(builder, confidence, call.function.name, args)
+            result = _run_tool_call(builder, confidence, call)
             messages.append({"role": "tool", "tool_call_id": call.id, "content": json.dumps(result)})
     else:
         print(f"  (stopped after {max_rounds} rounds -- fix may be incomplete)")

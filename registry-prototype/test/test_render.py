@@ -373,6 +373,25 @@ def test_render_08_nested_data_value_formatted_readably():
     check("render08-not-python-repr", "{'city'" not in html, html)
 
 
+def test_render_18_data_preview_escapes_html_in_record_values():
+    """Security-review finding, confirmed by direct reproduction: a data value containing HTML
+    metacharacters (an ordinary business name with '&', not a contrived attack) landed raw in a
+    <td> cell before this fix -- e.g. a business name of 'A&B Traders <img src=x
+    onerror=alert(document.cookie)>' rendered as live, executing HTML. Field-name headers and
+    schemaCode carry the same risk and get the same fix."""
+    schema = build_trade_license().build()
+    payload = 'A&B Traders <img src=x onerror=alert(document.cookie)>'
+    records = [{"applicantId": "A1", "businessName": payload, "tradeType": "RETAIL",
+                "address": {"city": "Springfield", "pincode": "62704"}}]
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "d.html"
+        render_data_preview(schema, records, str(out))
+        html = out.read_text()
+    check("render18-no-raw-img-tag", "<img src=x onerror=" not in html, html)
+    check("render18-escaped-value-present", "&lt;img src=x onerror=" in html, html)
+    check("render18-ampersand-escaped", "A&amp;B Traders" in html, html)
+
+
 if __name__ == "__main__":
     test_functions = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for fn in test_functions:

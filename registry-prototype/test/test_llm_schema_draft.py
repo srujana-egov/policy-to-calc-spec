@@ -13,9 +13,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 from builder import SchemaBuilder
-from llm_schema_draft import _execute_tool_call, log_judge_result
+from llm_schema_draft import _execute_tool_call, _run_tool_call, log_judge_result
 
 PASSED = []
 
@@ -436,6 +437,87 @@ def test_19_log_judge_result_never_raises_on_write_failure():
         check("19-does-not-raise", True)
     except OSError:
         check("19-does-not-raise", False, "log_judge_result raised OSError instead of swallowing it")
+
+
+def test_20_execute_tool_call_returns_error_on_missing_required_argument():
+    """Security-review finding, confirmed by direct reproduction: the model omitting a required
+    argument (e.g. no "type" on add_field) raised an uncaught KeyError before this fix, crashing
+    the whole drafting/fixing session instead of surfacing a tool error the model could react to,
+    the same as a deliberate validation ValueError already does."""
+    builder = SchemaBuilder("x")
+    result = _execute_tool_call(builder, {}, "add_field", {"label": "Name"})
+    check("20-missing-arg-returns-error-not-raises", "error" in result, result)
+    check("20-error-names-the-missing-key", "type" in result["error"], result)
+    check("20-builder-left-untouched", builder.properties == {}, builder.properties)
+
+
+def test_20b_execute_tool_call_returns_error_on_wrong_argument_type():
+    """Same class of bug, the other predictable shape: an argument present but the wrong type
+    (field_names=None instead of a list), which raises TypeError inside the tool body (iterating
+    None) rather than at an args["..."] lookup -- also must not crash the session."""
+    builder = SchemaBuilder("x")
+    _execute_tool_call(builder, {}, "add_field", {"label": "Name", "type": "string"})
+    result = _execute_tool_call(builder, {}, "add_unique_constraint", {"field_names": None})
+    check("20b-wrong-type-returns-error-not-raises", "error" in result, result)
+
+
+def test_20c_run_tool_call_returns_error_on_malformed_json_arguments():
+    """The other half of the same finding: a tool call whose arguments string isn't valid JSON
+    (uncaught in the calling loop before this fix -- json.loads lived outside _execute_tool_call's
+    own try/except) now surfaces as a tool error too, via _run_tool_call -- the shared
+    parse-then-execute helper draft_schema_from_description and apply_fix_from_description both
+    call instead of each duplicating json.loads + _execute_tool_call."""
+    builder = SchemaBuilder("x")
+    call = SimpleNamespace(function=SimpleNamespace(name="add_field", arguments="{not valid json"))
+    result = _run_tool_call(builder, {}, call)
+    check("20c-malformed-json-returns-error-not-raises", "error" in result, result)
+
+
+def test_20d_run_tool_call_still_dispatches_normally_for_well_formed_calls():
+    """Guards against the refactor itself: _run_tool_call must behave identically to the old
+    inlined json.loads + _execute_tool_call for the ordinary, well-formed case."""
+    builder = SchemaBuilder("x")
+    call = SimpleNamespace(function=SimpleNamespace(
+        name="add_field", arguments=json.dumps({"label": "Name", "type": "string"})))
+    result = _run_tool_call(builder, {}, call)
+    check("20d-dispatches-normally", result.get("field_name") == "name", result)
+
+
+def test_20e_execute_tool_call_catches_attribute_error_from_a_non_string_label():
+    """A second adversarial review found the KeyError/TypeError additions above were still
+    incomplete: add_one_of_field called with alternatives as a plain string (not a list) raises an
+    uncaught AttributeError ('str' object has no attribute 'get'), which neither handler covers. A
+    systematic audit across all 15 tools then found the SAME underlying root cause recurring in
+    five different tools: any tool whose label argument reaches camel_field_name()'s unconditional
+    label.strip() call breaks with AttributeError if label isn't a string. This tests two of those
+    five (add_field, add_raw_property) plus the originally-reported add_one_of_field case -- the
+    fix (a final bare `except Exception`) closes all of them at once by construction, rather than
+    needing a matching except clause added per case."""
+    builder = SchemaBuilder("x")
+    result = _execute_tool_call(builder, {}, "add_field", {"label": None, "type": "string"})
+    check("20e-add_field-none-label-returns-error", "error" in result, result)
+
+    result = _execute_tool_call(builder, {}, "add_raw_property", {"label": 123, "raw_schema": {}})
+    check("20e-add_raw_property-int-label-returns-error", "error" in result, result)
+
+    result = _execute_tool_call(builder, {}, "add_one_of_field", {"label": "Contact", "alternatives": "email"})
+    check("20e-add_one_of_field-string-alternatives-returns-error", "error" in result, result)
+
+
+def test_20f_execute_tool_call_catches_attribute_error_from_a_raw_dict_parent():
+    """The audit's second distinct root cause: add_nested_field assumes its parent field is a
+    PropertyDef (so parent.type resolves), but a field added via add_one_of_field, add_raw_property,
+    or add_ref_field is stored as a plain dict instead -- parent.type then raises AttributeError
+    ('dict' object has no attribute 'type'), a completely different code path from the
+    camel_field_name bug above, also now covered by the same catch-all."""
+    builder = SchemaBuilder("x")
+    _execute_tool_call(builder, {}, "add_one_of_field", {
+        "label": "Contact", "alternatives": [{"properties": {"email": {"type": "string"}}}],
+    })
+    result = _execute_tool_call(builder, {}, "add_nested_field", {
+        "parent_name": "contact", "label": "Sub", "type": "string",
+    })
+    check("20f-nested-field-under-raw-dict-parent-returns-error", "error" in result, result)
 
 
 if __name__ == "__main__":

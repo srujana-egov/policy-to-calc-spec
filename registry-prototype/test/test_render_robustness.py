@@ -240,6 +240,73 @@ def test_render_robustness_battery_never_crashes_and_stays_offline_safe():
             check(f"robustness-{case_name}-no-{pattern.strip('(:/@')}", pattern not in html, (case_name, pattern))
 
 
+def test_render_19_nested_property_name_with_html_metacharacters_is_escaped_in_attributes():
+    """Security-review finding, confirmed by direct reproduction: field labels are escaped, but
+    field_id (used raw in id=/for=/name= attributes) wasn't -- and _normalize_named_properties'
+    sanitization only ran one level deep, so a property name introduced two-plus levels down via
+    add_raw_property (exactly what the free-text LLM-drafting path uses) bypassed it entirely. A
+    nested field named 'evil"><script>alert(document.domain)</script>' used to land unescaped in
+    the generated preview HTML, producing a literal, browser-executing <script> tag."""
+    evil_name = 'evil"><script>alert(document.domain)</script>'
+    definition = {
+        "type": "object",
+        "properties": {
+            "container": {
+                "type": "object",
+                "properties": {evil_name: {"type": "string"}},
+            }
+        },
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "s.html"
+        render_schema_form_preview("nested-xss-test", definition, None, None, str(out))
+        html = out.read_text()
+    check("render19-no-literal-script-tag", "<script>alert(document.domain)</script>" not in html, html)
+    check("render19-no-unescaped-quote-breakout", 'evil"><script>' not in html, html)
+    check("render19-escaped-form-present", "evil&quot;&gt;&lt;script&gt;" in html, html)
+    for pattern in EXTERNAL_REF_PATTERNS:
+        check(f"render19-no-{pattern.strip('(:/@')}", pattern not in html, pattern)
+
+
+def test_render_20_script_breakout_via_pattern_value_is_neutralized():
+    """Security-review finding, confirmed by direct reproduction: schema content (e.g. a pattern
+    string) is dumped via json.dumps() straight into <script> blocks (VALIDATION_SCHEMA and
+    friends) with no breakout guard -- a pattern containing a literal '</script><script>...'
+    closed the legitimate script tag early and opened a new, real, executing one."""
+    payload = "</script><script>alert(document.domain)</script>"
+    definition = {
+        "type": "object",
+        "properties": {"code": {"type": "string", "pattern": payload}},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "s.html"
+        render_schema_form_preview("script-breakout-test", definition, None, None, str(out))
+        html = out.read_text()
+    check("render20-no-early-script-close", payload not in html, html)
+    check("render20-escaped-slash-present", "<\\/script>" in html, html)
+
+
+def test_render_21_deep_nesting_falls_back_instead_of_crashing():
+    """Security-review finding, confirmed by direct reproduction: add_raw_property/
+    define_reusable_schema explicitly support "arbitrary depth" per the README, but ~1000+ levels
+    of nesting threw an unhandled RecursionError in _render_field before this fix, killing the CLI
+    instead of degrading to a raw-JSON fallback like genuinely-unsupported constructs do. Built
+    iteratively (not recursively) -- constructing the test fixture itself must not hit the same
+    limit before the render call even happens."""
+    node = {"type": "string"}
+    for i in range(1200):
+        node = {"type": "object", "properties": {f"level{i}": node}}
+    definition = {"type": "object", "properties": {"root": node}}
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "s.html"
+        render_schema_form_preview("deep-nesting-test", definition, None, None, str(out))
+        html = out.read_text()
+    check("render21-renders-something", bool(html))
+    check("render21-graceful-fallback-note", "nested too deeply" in html, html)
+    for pattern in EXTERNAL_REF_PATTERNS:
+        check(f"render21-no-{pattern.strip('(:/@')}", pattern not in html, pattern)
+
+
 def test_preview_gap_scanner_never_crashes_on_the_same_battery():
     """The gap scanner + completeness scorer walk the same tree the renderer does, using new
     code -- confirms every adversarial shape in CASES above is safe to run through
