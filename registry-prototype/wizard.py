@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 
 from builder import SchemaBuilder
-from models import SchemaRequest
+from models import PropertyDef, SchemaRequest
 from render import get_preview_completeness, render_data_preview, render_schema_form_preview
 from validate import validate_json_schema_syntax, validate_schema_request
 
@@ -292,13 +292,26 @@ def resolve_required_gaps(builder: SchemaBuilder, confidence: dict) -> None:
     """Targeted follow-up for the single highest-value gap an LLM draft can leave: fields whose
     required/optional status was inferred rather than actually stated by the user. Question count
     scales with how much was left unsaid, not with schema size -- a precisely-described schema
-    gets no questions here at all."""
+    gets no questions here at all.
+
+    Skips any confidence entry whose field no longer actually exists in `builder.properties` --
+    a real bug found live-testing: `confidence` is a separate dict tracked in wizard.py, not
+    cleaned up by builder.remove_field(). If the model adds a field, then later replaces it with a
+    differently-named one and removes the original mid-draft (a real, confirmed sequence -- e.g.
+    a plain array field superseded by the same field re-added with a contains/minContains shape
+    under a colliding label, becoming "fieldName2"), the original name's stale confidence entry
+    survives. Without this check, answering "yes" here would add a required-list entry for a
+    field that doesn't exist -- and worse, nothing could ever remove it afterward, since
+    set_required/remove_field both refuse to touch a field name that isn't in `properties`,
+    which was the exact unrecoverable loop this was found from."""
     for field_id, info in confidence.items():
         if info.get("required_stated"):
             continue
         if "." in field_id:
             parent_name, sub_name = field_id.split(".", 1)
-            parent = builder.properties[parent_name]
+            parent = builder.properties.get(parent_name)
+            if parent is None or not isinstance(parent, PropertyDef) or sub_name not in (parent.properties or {}):
+                continue
             currently_required = sub_name in (parent.required or [])
             wants_required = ask_yes_no(f"Is '{sub_name}' (inside '{parent_name}') required on every record?")
             if wants_required and not currently_required:
@@ -308,6 +321,8 @@ def resolve_required_gaps(builder: SchemaBuilder, confidence: dict) -> None:
             elif not wants_required and currently_required:
                 parent.required.remove(sub_name)
         else:
+            if field_id not in builder.properties:
+                continue
             currently_required = field_id in builder.required
             wants_required = ask_yes_no(f"Is '{field_id}' required on every record?")
             if wants_required and not currently_required:

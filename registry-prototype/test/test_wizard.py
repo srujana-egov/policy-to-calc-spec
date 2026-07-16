@@ -375,6 +375,40 @@ def test_wiz_15_resolve_required_gaps_can_answer_no_and_leave_optional():
     check("wiz15-stays-optional", "notes" not in builder.required, builder.required)
 
 
+def test_wiz_15b_resolve_required_gaps_skips_a_field_removed_mid_draft():
+    """A real bug found live-testing the free-text drafting flow: the model added a plain field,
+    then replaced it with a differently-shaped one under the same label (colliding into
+    'fieldName2') and removed the original -- but confidence (tracked separately from the
+    builder, never cleaned up by remove_field) still had a stale entry for the removed name.
+    Before this fix, answering 'yes' here would add a required-list entry for a field that no
+    longer exists -- and nothing could ever remove it afterward, since set_required/remove_field
+    both refuse to touch a field name that isn't in `properties`, an unrecoverable loop."""
+    builder = SchemaBuilder("x")
+    builder.add_field("Real Field", "string", required=True)
+    confidence = {
+        "realField": {"required_stated": True, "details_stated": True},
+        "uploadedDocuments": {"required_stated": False, "details_stated": False},  # stale -- no such field
+    }
+    with canned_input([]) as queue:  # no question should be asked for the stale entry
+        wizard.resolve_required_gaps(builder, confidence)
+    check("wiz15b-no-question-asked", not queue, queue)
+    check("wiz15b-not-added-to-required", "uploadedDocuments" not in builder.required, builder.required)
+    check("wiz15b-real-field-untouched", "realField" in builder.required, builder.required)
+
+
+def test_wiz_15c_resolve_required_gaps_skips_a_nested_field_whose_parent_is_gone():
+    builder = SchemaBuilder("x")
+    builder.add_field("Real Field", "string", required=True)
+    confidence = {
+        "realField": {"required_stated": True, "details_stated": True},
+        "ghostParent.city": {"required_stated": False, "details_stated": True},  # parent never existed
+    }
+    with canned_input([]) as queue:
+        wizard.resolve_required_gaps(builder, confidence)
+    check("wiz15c-no-question-asked", not queue, queue)
+    check("wiz15c-no-crash", "realField" in builder.required, builder.required)
+
+
 # ---------------------------------------------------------------------------
 # print_preview_completeness -- the CLI-side echo of the HTML completeness banner. Every other
 # test that exercises this code path (via in_scratch_cwd) redirects stdout to a StringIO that's

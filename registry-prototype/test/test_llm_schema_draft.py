@@ -336,6 +336,34 @@ def test_16e_set_required_is_idempotent_and_rejects_unknown_field():
     check("16e-unknown-field-error", "error" in unknown_result, unknown_result)
 
 
+def test_16f_set_required_cleans_up_a_dangling_required_entry_for_a_nonexistent_field():
+    """A real bug found live-testing: a field can end up listed in `required` with no matching
+    entry in `properties` (see test_wiz_15b in test_wizard.py for how this actually happens).
+    Before this fix, asking to un-require a field in that state always returned an error and
+    never touched `required` -- an unrecoverable loop, since that was the AI's only way to try to
+    fix it. 'make sure this ISN'T required' must be satisfiable even for a phantom field, since
+    that's exactly the escape hatch needed."""
+    builder = SchemaBuilder("x")
+    confidence = {}
+    builder.required.append("ghostField")  # simulates the dangling state directly
+    result = _execute_tool_call(builder, confidence, "set_required",
+                                 {"field_name": "ghostField", "required": False})
+    check("16f-ok", result.get("ok") is True, result)
+    check("16f-dangling-entry-removed", "ghostField" not in builder.required, builder.required)
+
+
+def test_16g_set_required_still_rejects_requiring_a_nonexistent_field():
+    """The escape hatch only applies to un-requiring a phantom field -- there's no way to
+    satisfy "make this required" for a field that was never actually added, so that must still
+    error, not silently add a bogus entry to `required`."""
+    builder = SchemaBuilder("x")
+    confidence = {}
+    result = _execute_tool_call(builder, confidence, "set_required",
+                                 {"field_name": "ghostField", "required": True})
+    check("16g-still-errors", "error" in result, result)
+    check("16g-nothing-added", "ghostField" not in builder.required, builder.required)
+
+
 def test_17_log_judge_result_writes_valid_jsonl_with_expected_fields():
     with tempfile.TemporaryDirectory() as tmp:
         log_path = str(Path(tmp) / "judge_log.jsonl")

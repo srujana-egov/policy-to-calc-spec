@@ -518,9 +518,20 @@ def _execute_tool_call(builder: SchemaBuilder, confidence: dict, name: str, args
 
         if name == "set_required":
             field_name = args["field_name"]
-            if field_name not in builder.properties:
-                return {"error": f"'{field_name}' isn't a known field"}
             wants_required = bool(args["required"])
+            if field_name not in builder.properties:
+                # A real bug found live-testing: a field can end up listed in `required` with no
+                # matching entry in `properties` (a stale confidence-tracking entry in wizard.py
+                # resurrecting a field the model had already removed mid-draft). Before this
+                # fix, asking to un-require a field in that state always errored here -- since
+                # there's no way to satisfy "make this required" for a field that doesn't exist,
+                # but "make sure this ISN'T required" is trivially satisfiable by just clearing
+                # the dangling entry, which is exactly what's needed to escape that state.
+                if not wants_required and field_name in builder.required:
+                    builder.required.remove(field_name)
+                    return {"ok": True, "note": f"'{field_name}' wasn't an actual field -- "
+                                                 "removed the dangling required-list entry"}
+                return {"error": f"'{field_name}' isn't a known field"}
             currently_required = field_name in builder.required
             if wants_required and not currently_required:
                 builder.required.append(field_name)
