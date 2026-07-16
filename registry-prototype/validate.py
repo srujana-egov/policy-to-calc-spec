@@ -17,6 +17,14 @@ from models import PropertyDef, SchemaRequest
 _SCHEMA_CODE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
 
 
+def is_valid_schema_code(code: str) -> bool:
+    """Shared with wizard.py's schema-name prompt, so a clearly-wrong name (typed by mistake, or
+    by someone unfamiliar with the tool at a live demo) gets caught immediately at the point it's
+    typed, with a chance to redo it -- instead of only surfacing much later, deep into drafting,
+    as one line in a wall of validation errors."""
+    return bool(code) and bool(_SCHEMA_CODE_RE.match(code))
+
+
 def _validate_property(name: str, prop, path: str) -> list[str]:
     """Checks that apply to any property, one level deep or top-level -- called recursively for
     a nested object's own sub-properties. `prop` may be a raw dict rather than a PropertyDef --
@@ -86,7 +94,7 @@ def validate_schema_request(schema: SchemaRequest) -> list[str]:
 
     if not schema.schemaCode:
         errors.append("schemaCode is empty")
-    elif not _SCHEMA_CODE_RE.match(schema.schemaCode):
+    elif not is_valid_schema_code(schema.schemaCode):
         errors.append(f"schemaCode '{schema.schemaCode}' should start with a letter and contain "
                        "only letters, numbers, '.', '-' or '_' -- no spaces")
 

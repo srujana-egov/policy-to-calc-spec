@@ -174,6 +174,79 @@ def test_wiz_04_invalid_type_choice_reasks():
     check("wiz04-field-added", "name" in schema.definition.properties)
 
 
+def test_wiz_04b_invalid_schema_code_reasks_immediately():
+    """A real gap found live at a demo: an obviously-wrong schema name (a typo, or someone
+    unfamiliar with the naming rule typing a sentence) used to be silently accepted and only
+    surfaced as a validation error much later, deep into drafting. ask_schema_code() now catches
+    it the moment it's typed, with a specific reason, and re-asks -- consistent with every other
+    invalid-input-reasks-immediately convention in this wizard (see test_wiz_04 above)."""
+    answers = [
+        "i dont understand", "trade license with spaces", "trade-license",  # two invalid, then valid
+        "Name", "1", "no", "no", "yes", "",
+        "",
+        "no", "no",
+        "yes",
+    ]
+    schema, leftover = run_schema_session_with(answers)
+    check("wiz04b-all-input-consumed", not leftover, leftover)
+    check("wiz04b-valid-code-accepted", schema.schemaCode == "trade-license", schema.schemaCode)
+
+
+def test_wiz_04c_yes_no_reprompts_helpfully_after_repeated_confusion():
+    """A real gap found live at a demo: someone typing something like 'i dont understand' at a
+    yes/no prompt got only a bare 'please answer yes or no' every time, with no way to recover
+    the actual question if it had scrolled off screen. After a second wrong answer, the question
+    itself gets re-shown, plus a reminder that 'quit' is always available."""
+    with mock.patch("builtins.input", side_effect=["i dont understand", "still confused", "yes"]):
+        with io.StringIO() as buf:
+            with contextlib.redirect_stdout(buf):
+                result = wizard.ask_yes_no("Is 'applicantType' required on every record?")
+            output = buf.getvalue()
+    check("wiz04c-eventually-returns-true", result is True, result)
+    check("wiz04c-question-repeated", "the question again: Is 'applicantType'" in output, output)
+    check("wiz04c-quit-mentioned", "quit" in output, output)
+
+
+def test_wiz_04d_yes_no_help_shows_specific_explanation_without_deciding_the_answer():
+    """The 'help' escape hatch is deliberately NOT 'let an AI interpret what you meant' -- it only
+    ever explains the fixed question in plain language, then still requires an actual yes/no
+    answer afterward. Typing 'help' must never itself count as an answer."""
+    with mock.patch("builtins.input", side_effect=["help", "yes"]):
+        with io.StringIO() as buf:
+            with contextlib.redirect_stdout(buf):
+                result = wizard.ask_yes_no(
+                    "Is 'aadhaarNumber' required on every record?",
+                    help_text="This means: will every single record need a value for 'aadhaarNumber'?")
+            output = buf.getvalue()
+    check("wiz04d-still-returns-true-after-help", result is True, result)
+    check("wiz04d-specific-help-shown", "will every single record need a value for 'aadhaarNumber'" in output, output)
+
+
+def test_wiz_04e_yes_no_help_falls_back_to_a_generic_message_when_none_given():
+    with mock.patch("builtins.input", side_effect=["?", "no"]):
+        with io.StringIO() as buf:
+            with contextlib.redirect_stdout(buf):
+                result = wizard.ask_yes_no("Some question with no help_text")
+            output = buf.getvalue()
+    check("wiz04e-still-returns-false-after-help", result is False, result)
+    check("wiz04e-generic-fallback-shown", "no extra explanation available" in output, output)
+
+
+def test_wiz_04f_every_ask_yes_no_call_site_in_wizard_has_help_text():
+    """Guards against the fallback ('no extra explanation available for this one') silently
+    becoming the norm as new prompts get added -- every current call site was deliberately given
+    a specific explanation; a future one that forgets should be caught here, not slip through."""
+    import ast
+    import inspect
+    tree = ast.parse(inspect.getsource(wizard))
+    missing = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "ask_yes_no":
+            if not any(kw.arg == "help_text" for kw in node.keywords):
+                missing.append(getattr(node, "lineno", "?"))
+    check("wiz04f-no-call-sites-missing-help-text", not missing, missing)
+
+
 def test_wiz_05_redo_field_after_no():
     answers = [
         "x",

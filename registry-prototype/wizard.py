@@ -17,7 +17,7 @@ import urllib.request
 from builder import SchemaBuilder
 from models import PropertyDef, SchemaRequest
 from render import get_preview_completeness, render_data_preview, render_schema_form_preview
-from validate import validate_json_schema_syntax, validate_schema_request
+from validate import is_valid_schema_code, validate_json_schema_syntax, validate_schema_request
 
 
 class Cancelled(Exception):
@@ -31,14 +31,52 @@ def ask(prompt: str) -> str:
     return answer
 
 
-def ask_yes_no(prompt: str) -> bool:
+def ask_yes_no(prompt: str, help_text: str | None = None) -> bool:
+    """`help_text`, when the caller provides one, is a plain-language explanation of what this
+    specific question actually means -- shown on demand if someone types 'help' or '?', without
+    ever touching how yes/no itself gets interpreted. Found needed live at a real demo: someone
+    confused about a question's *meaning* (not its yes/no format) had no way to ask for
+    clarification. The fix deliberately isn't 'make the AI interpret free-text answers here' --
+    that would trade an unambiguous yes/no for something an LLM could misread, exactly the
+    failure mode every other bug this session found came from. It's 'let them ask what a rigid
+    question means, then still answer it rigidly.'"""
+    attempts = 0
     while True:
         answer = ask(prompt + " (yes/no)").lower()
         if answer in ("y", "yes"):
             return True
         if answer in ("n", "no"):
             return False
-        print("  please answer yes or no")
+        if answer in ("help", "?"):
+            print(f"  {help_text}" if help_text else
+                  "  no extra explanation available for this one -- just answer yes or no for the question above")
+            continue
+        attempts += 1
+        if attempts >= 2:
+            # Found live at a real demo: someone confused about what the question itself means
+            # can get stuck re-reading a prompt that's scrolled up off screen. Re-showing the
+            # actual question, plus the always-available ways out, is a small thing but a real one
+            # -- every prompt in this wizard should feel like it's always listening, not like a
+            # fixed script that ignores confusion.
+            print(f"  still need a yes or no -- the question again: {prompt}")
+            print("  (type 'help' to explain what this means, or 'quit' to stop the whole session)")
+        else:
+            print("  please answer yes or no (or type 'help' if you're not sure what this means)")
+
+
+def ask_schema_code() -> str:
+    """Validates the schema code the moment it's typed, using the exact same check
+    validate_schema_request applies later -- found needed live at a real demo: someone who typed
+    something that isn't a valid schema code (a typo, or just not knowing the naming rule) had no
+    way to know that until deep into drafting, buried as one line among a wall of validation
+    errors. Catching it here means an obviously-wrong name gets an immediate, specific "that's not
+    valid, try again" instead of silently being accepted and only failing much later."""
+    while True:
+        code = ask("What do you want to call this schema? (e.g. 'license-registry')")
+        if is_valid_schema_code(code):
+            return code
+        print(f"  '{code}' doesn't look like a valid schema code -- it should start with a letter "
+              "and contain only letters, numbers, '.', '-' or '_' (no spaces). Try again.")
 
 
 _FIELD_TYPE_OPTIONS = {
@@ -54,7 +92,9 @@ _FIELD_TYPE_OPTIONS = {
 
 def ask_text_pattern(label: str) -> str | None:
     if not ask_yes_no(f"  Does '{label}' need to be an exact number of digits (like a phone "
-                       "number or pincode)?"):
+                       "number or pincode)?",
+                       help_text=f"This restricts '{label}' to a fixed number of digits only, like a "
+                                 "6-digit pincode or 10-digit phone number. Say no if it can be any text."):
         return None
     raw = ask("  How many digits exactly?")
     if raw.isdigit():
@@ -87,7 +127,10 @@ def ask_optional_int(prompt: str) -> int | None:
 
 
 def ask_number_bounds(label: str) -> tuple[float | None, float | None]:
-    if not ask_yes_no(f"  Does '{label}' need a minimum or maximum allowed value?"):
+    if not ask_yes_no(f"  Does '{label}' need a minimum or maximum allowed value?",
+                       help_text=f"This sets a lower and/or upper bound on the number entered for "
+                                 f"'{label}', like latitude being between -90 and 90. Say no if any "
+                                 "number is fine."):
         return None, None
     minimum = ask_optional_number("  Smallest allowed value? (blank for no minimum)")
     maximum = ask_optional_number("  Largest allowed value? (blank for no maximum)")
@@ -95,7 +138,9 @@ def ask_number_bounds(label: str) -> tuple[float | None, float | None]:
 
 
 def ask_text_length_bounds(label: str) -> tuple[int | None, int | None]:
-    if not ask_yes_no(f"  Does '{label}' need a minimum or maximum length?"):
+    if not ask_yes_no(f"  Does '{label}' need a minimum or maximum length?",
+                       help_text=f"This limits how many characters '{label}' can have, like a username "
+                                 "needing to be at least 3 characters. Say no if any length is fine."):
         return None, None
     min_length = ask_optional_int("  Shortest allowed length? (blank for no minimum)")
     max_length = ask_optional_int("  Longest allowed length? (blank for no maximum)")
@@ -143,7 +188,10 @@ def configure_nested_fields(builder: SchemaBuilder, parent_name: str, parent_lab
         if not sub_label:
             break
         field_type = ask_field_type(sub_label, allow_group=False)
-        required = ask_yes_no(f"    Is '{sub_label}' required?")
+        required = ask_yes_no(f"    Is '{sub_label}' required?",
+                               help_text=f"This means: will every record's '{parent_label}' group need "
+                                         f"a value for '{sub_label}', or is it okay to sometimes leave "
+                                         "it blank?")
         description = ask(f"    One-line description for '{sub_label}' (optional):")
         sub_name = builder.add_nested_field(
             parent_name, sub_label, field_type["type"], required=required, format=field_type["format"],
@@ -160,7 +208,9 @@ def ask_field(builder: SchemaBuilder) -> str | None:
     if not label:
         return None
     field_type = ask_field_type(label)
-    required = ask_yes_no(f"  Is '{label}' required on every record?")
+    required = ask_yes_no(f"  Is '{label}' required on every record?",
+                           help_text=f"This means: will every single record need a value for '{label}', "
+                                     "or is it okay to sometimes leave it blank?")
     description = ask(f"  One-line description for '{label}' (optional):")
     name = builder.add_field(label, field_type["type"], required=required, format=field_type["format"],
                               enum=field_type["enum"], description=description or None,
@@ -180,27 +230,39 @@ def configure_fields(builder: SchemaBuilder) -> None:
 
 
 def configure_constraints(builder: SchemaBuilder) -> None:
-    if ask_yes_no("Should any field (or combination of fields) be unique across every record?"):
+    if ask_yes_no("Should any field (or combination of fields) be unique across every record?",
+                  help_text="This means no two records can share the same value here -- like making "
+                            "sure no two licenses have the same license number. Say no if duplicates "
+                            "are fine."):
         while True:
             raw = ask(f"  Which field(s)? (comma-separated: {', '.join(builder.properties.keys())})")
             fields = [f.strip() for f in raw.split(",") if f.strip()]
             if fields:
                 builder.add_unique_constraint(fields)
-            if not ask_yes_no("  Another unique constraint?"):
+            if not ask_yes_no("  Another unique constraint?",
+                               help_text="Set up one more 'these fields must be unique together' rule, "
+                                         "or say no if you're done with unique constraints."):
                 break
 
-    if ask_yes_no("Do you want any field indexed for fast search/filtering?"):
+    if ask_yes_no("Do you want any field indexed for fast search/filtering?",
+                  help_text="An index makes searching/filtering by this field faster later, at some "
+                            "small cost when writing records. If you're not sure, it's safe to say no "
+                            "-- this can always be added later."):
         while True:
             field = ask(f"  Which field? ({', '.join(builder.properties.keys())})")
             if field in builder.properties:
                 gin = ask_yes_no(f"  Should people be able to search within the '{field}' field's "
                                   "text (like a search box), rather than only matching/sorting on "
-                                  "the exact value?")
+                                  "the exact value?",
+                                  help_text=f"Say yes if people should find records by typing PART of "
+                                            f"what's in '{field}' (like a search box). Say no if it "
+                                            "should only match the exact, whole value.")
                 index_name = ask("  Give this index a name? (optional, blank for auto):")
                 builder.add_index(field, method="gin" if gin else "btree", name=index_name or None)
             else:
                 print(f"  '{field}' isn't a known field -- skipping")
-            if not ask_yes_no("  Index another field?"):
+            if not ask_yes_no("  Index another field?",
+                               help_text="Set up an index for one more field, or say no if you're done."):
                 break
 
 
@@ -209,7 +271,9 @@ def redo_field(builder: SchemaBuilder, name: str) -> None:
     re-asks -- the targeted fix, so a wrong type doesn't force restarting the whole schema."""
     label = name
     field_type = ask_field_type(label)
-    required = ask_yes_no(f"  Is '{label}' required on every record?")
+    required = ask_yes_no(f"  Is '{label}' required on every record?",
+                           help_text=f"This means: will every single record need a value for '{label}', "
+                                     "or is it okay to sometimes leave it blank?")
     description = ask(f"  One-line description for '{label}' (optional):")
     was_required = name in builder.required
     builder.properties[name] = builder.properties[name].__class__(
@@ -313,7 +377,10 @@ def resolve_required_gaps(builder: SchemaBuilder, confidence: dict) -> None:
             if parent is None or not isinstance(parent, PropertyDef) or sub_name not in (parent.properties or {}):
                 continue
             currently_required = sub_name in (parent.required or [])
-            wants_required = ask_yes_no(f"Is '{sub_name}' (inside '{parent_name}') required on every record?")
+            wants_required = ask_yes_no(f"Is '{sub_name}' (inside '{parent_name}') required on every record?",
+                                         help_text=f"This means: will every record's '{parent_name}' "
+                                                   f"group need a value for '{sub_name}', or is it okay "
+                                                   "to sometimes leave it blank?")
             if wants_required and not currently_required:
                 if parent.required is None:
                     parent.required = []
@@ -324,7 +391,10 @@ def resolve_required_gaps(builder: SchemaBuilder, confidence: dict) -> None:
             if field_id not in builder.properties:
                 continue
             currently_required = field_id in builder.required
-            wants_required = ask_yes_no(f"Is '{field_id}' required on every record?")
+            wants_required = ask_yes_no(f"Is '{field_id}' required on every record?",
+                                         help_text=f"This means: will every single record need a value "
+                                                   f"for '{field_id}', or is it okay to sometimes leave "
+                                                   "it blank?")
             if wants_required and not currently_required:
                 builder.required.append(field_id)
             elif not wants_required and currently_required:
@@ -341,7 +411,7 @@ def run_llm_schema_session() -> SchemaRequest:
 
     print("=== Registry schema drafting -- describe it, don't answer a form ===")
     print("(type 'quit' at any question to stop -- nothing is saved until the very end)\n")
-    schema_code = ask("What do you want to call this schema? (e.g. 'license-registry')")
+    schema_code = ask_schema_code()
     description = ask("Describe the form you need, in your own words -- the fields, whether "
                        "each one's required, and any groups (like an address with city/pincode):")
 
@@ -395,7 +465,10 @@ def run_llm_schema_session() -> SchemaRequest:
         print("(fields marked 'assumed' were guessed from your description, not stated -- check those first)")
         print_preview_completeness(data["definition"])
 
-        if ask_yes_no("\nDoes this look right? Confirm to create the schema"):
+        if ask_yes_no("\nDoes this look right? Confirm to create the schema",
+                      help_text="Say yes only after you've opened the preview link above and it "
+                                "matches what you wanted. Saying no lets you fix just the part that's "
+                                "wrong, instead of starting the whole schema over."):
             break
 
         print("Not confirmed -- let's fix just the part that's wrong (type 'quit' to stop entirely).")
@@ -409,7 +482,7 @@ def run_schema_session() -> SchemaRequest:
     SchemaRequest. Split from main() so tests can drive the exact interactive code path."""
     print("=== Registry schema wizard ===")
     print("(type 'quit' at any question to stop -- nothing is saved until the very end)\n")
-    schema_code = ask("What do you want to call this schema? (e.g. 'license-registry')")
+    schema_code = ask_schema_code()
     builder = SchemaBuilder(schema_code)
 
     configure_fields(builder)
@@ -434,7 +507,10 @@ def run_schema_session() -> SchemaRequest:
         print("(this shows what the data-entry form will actually look like)")
         print_preview_completeness(data["definition"])
 
-        if ask_yes_no("\nDoes this look right? Confirm to create the schema"):
+        if ask_yes_no("\nDoes this look right? Confirm to create the schema",
+                      help_text="Say yes only after you've opened the preview link above and it "
+                                "matches what you wanted. Saying no lets you fix just the part that's "
+                                "wrong, instead of starting the whole schema over."):
             break
 
         print("Not confirmed -- let's fix just the part that's wrong (type 'quit' to stop entirely).")
@@ -490,7 +566,9 @@ def main():
     schema = run_llm_schema_session() if mode.strip().lower().startswith("d") else run_schema_session()
     write_schema(schema)
 
-    if ask_yes_no("\nAdd data records to this schema now?"):
+    if ask_yes_no("\nAdd data records to this schema now?",
+                  help_text="This is optional -- you can always add real records later. Say yes only "
+                            "if you want to enter some data right now."):
         from data_entry import run_data_session, write_records
         records = run_data_session(schema)
         write_records(schema, records)
