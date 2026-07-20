@@ -519,6 +519,69 @@ def test_wiz_17_print_preview_completeness_omits_gap_section_when_fully_complete
     check("wiz17-no-gap-section", "Needs review" not in output, output)
 
 
+# ---------------------------------------------------------------------------
+# data_entry.ask_record_value against raw-dict properties -- models.py's "any JSON Schema" escape
+# hatch (oneOf/anyOf, $ref, or an add_raw_property fragment) means schema.definition.properties
+# values aren't always a PropertyDef. A real crash found live: entering data against a schema with
+# a oneOf field raised an uncaught AttributeError ('dict' object has no attribute 'type') the
+# moment the CLI reached that field, right after a perfectly ordinary enum field worked fine.
+# ---------------------------------------------------------------------------
+
+def test_wiz_18_data_entry_handles_a_one_of_field_via_numbered_picker():
+    builder = SchemaBuilder("water-sewer")
+    builder.add_field("Connection Type", "string", enum=["New", "Transfer"], required=True)
+    builder.add_one_of_field("Contact Method", [
+        {"properties": {"email": {"type": "string"}}, "required": ["email"]},
+        {"properties": {"phone": {"type": "string"}}, "required": ["phone"]},
+    ])
+    schema = builder.build()
+    answers = ["New", "1", "a@example.com", "no", "yes"]
+    records, leftover = run_data_session_with(schema, answers)
+    check("wiz18-all-input-consumed", not leftover, leftover)
+    check("wiz18-enum-value", records[0]["connectionType"] == "New", records[0])
+    check("wiz18-oneof-value", records[0]["contactMethod"] == {"email": "a@example.com"}, records[0])
+
+
+def test_wiz_18b_data_entry_one_of_field_can_be_skipped_when_optional():
+    builder = SchemaBuilder("water-sewer")
+    builder.add_field("Connection Type", "string", enum=["New", "Transfer"], required=True)
+    builder.add_one_of_field("Contact Method", [
+        {"properties": {"email": {"type": "string"}}, "required": ["email"]},
+        {"properties": {"phone": {"type": "string"}}, "required": ["phone"]},
+    ])
+    schema = builder.build()
+    answers = ["Transfer", "", "no", "yes"]
+    records, leftover = run_data_session_with(schema, answers)
+    check("wiz18b-all-input-consumed", not leftover, leftover)
+    check("wiz18b-oneof-skipped", "contactMethod" not in records[0], records[0])
+
+
+def test_wiz_19_data_entry_resolves_an_internal_ref_field():
+    builder = SchemaBuilder("ref-test")
+    builder.define_reusable_schema("Address", {
+        "type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"],
+    })
+    builder.add_ref_field("Home Address", "Address", required=True)
+    schema = builder.build()
+    answers = ["Springfield", "no", "yes"]
+    records, leftover = run_data_session_with(schema, answers)
+    check("wiz19-all-input-consumed", not leftover, leftover)
+    check("wiz19-ref-resolved-value", records[0]["homeAddress"] == {"city": "Springfield"}, records[0])
+
+
+def test_wiz_20_data_entry_falls_back_to_raw_json_for_a_genuinely_exotic_property():
+    """A property this CLI has no dedicated question for (here, an array with a 'contains' rule,
+    added via add_raw_property) -- must not crash and must not silently drop the field; an
+    optional one can still be skipped with a blank answer."""
+    builder = SchemaBuilder("exotic-test")
+    builder.add_raw_property("Tags", {"type": "array", "contains": {"const": "urgent"}}, required=False)
+    schema = builder.build()
+    answers = ["", "no", "yes"]
+    records, leftover = run_data_session_with(schema, answers)
+    check("wiz20-all-input-consumed", not leftover, leftover)
+    check("wiz20-optional-skip-works", "tags" not in records[0], records[0])
+
+
 if __name__ == "__main__":
     test_functions = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for fn in test_functions:

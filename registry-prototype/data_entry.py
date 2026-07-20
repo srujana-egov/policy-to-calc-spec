@@ -19,29 +19,116 @@ from wizard import _registry_headers, ask, ask_yes_no
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-def ask_nested_record_value(field_name: str, prop: PropertyDef, required: bool):
-    """One level of nesting -- a group-of-fields value (e.g. 'address') asked as its own set of
-    sub-questions, matching how ../wizard.py authors it. An optional group can be skipped
-    entirely; a required one always asks its own sub-fields (which may themselves be optional)."""
-    if not required and not ask_yes_no(f"  Include '{field_name}'?"):
+def _resolve_ref_for_entry(prop: dict, defs: dict) -> dict | None:
+    """Same reasoning as render.py's _resolve_internal_ref -- only an internal '#/$defs/...' or
+    '#/definitions/...' ref is resolved (no network calls, matching this project's offline-safety
+    guarantee); an external/unresolvable ref falls through to the raw-JSON fallback below."""
+    ref = prop.get("$ref")
+    if not isinstance(ref, str):
         return None
-    print(f"  --- {field_name} ---")
+    for prefix in ("#/$defs/", "#/definitions/"):
+        if ref.startswith(prefix):
+            target = defs.get(ref[len(prefix):])
+            return target if isinstance(target, dict) else None
+    return None
+
+
+def _oneof_alt_summary(alt, index: int) -> str:
+    if not isinstance(alt, dict):
+        return f"Option {index + 1}"
+    if alt.get("title"):
+        return str(alt["title"])
+    props = alt.get("properties")
+    if props:
+        return ", ".join(props.keys())
+    return f"Option {index + 1}"
+
+
+def ask_one_of_value(field_name: str, alternatives: list, required: bool, defs: dict):
+    """oneOf/anyOf as a CLI Q&A: 'choose ONE of the following ways to provide this,' the same
+    construct render.py's HTML preview renders as a radio-button switcher (_render_one_of) --
+    here, a numbered menu, then that alternative's own sub-fields asked as a nested group."""
+    print(f"  '{field_name}' is one of several possible shapes:")
+    for i, alt in enumerate(alternatives):
+        print(f"    {i + 1}) {_oneof_alt_summary(alt, i)}")
+    while True:
+        raw = ask(f"  Which one applies?{'' if required else ' (blank to skip)'}")
+        if not raw and not required:
+            return None
+        try:
+            choice = int(raw) - 1
+        except ValueError:
+            choice = -1
+        if 0 <= choice < len(alternatives):
+            break
+        print(f"  please enter a number from 1-{len(alternatives)}")
+    alt = alternatives[choice]
+    if not isinstance(alt, dict):
+        return None
+    alt_required = set(alt.get("required") or [])
     nested = {}
-    for sub_name, sub_prop in (prop.properties or {}).items():
-        value = ask_record_value(sub_name, sub_prop, sub_name in (prop.required or []))
+    for sub_name, sub_prop in alt.get("properties", {}).items():
+        value = ask_record_value(sub_name, sub_prop, sub_name in alt_required, defs=defs)
         if value is not None:
             nested[sub_name] = value
     return nested or None
 
 
-def ask_record_value(field_name: str, prop: PropertyDef, required: bool):
-    if prop.type == "object" and prop.properties:
-        return ask_nested_record_value(field_name, prop, required)
+def ask_nested_record_value(field_name: str, prop: dict, required: bool, defs: dict | None = None):
+    """One level of nesting -- a group-of-fields value (e.g. 'address') asked as its own set of
+    sub-questions, matching how ../wizard.py authors it. An optional group can be skipped
+    entirely; a required one always asks its own sub-fields (which may themselves be optional).
+    Takes a plain dict (not a PropertyDef) -- ask_record_value normalizes either shape to a dict
+    before calling this, since a nested group can originate from a modeled PropertyDef.properties
+    entry or from a raw dict's own "properties"/"required" keys (e.g. a dependentSchemas group,
+    or an add_raw_property fragment) -- one shape, uniformly handled here either way."""
+    if not required and not ask_yes_no(f"  Include '{field_name}'?"):
+        return None
+    print(f"  --- {field_name} ---")
+    nested_required = set(prop.get("required") or [])
+    nested = {}
+    for sub_name, sub_prop in (prop.get("properties") or {}).items():
+        value = ask_record_value(sub_name, sub_prop, sub_name in nested_required, defs=defs)
+        if value is not None:
+            nested[sub_name] = value
+    return nested or None
+
+
+def ask_record_value(field_name: str, prop, required: bool, defs: dict | None = None):
+    """Asks for one field's value via the CLI. `prop` may be a PropertyDef (the common, guided-
+    wizard case) or a plain dict -- models.py's "any JSON Schema" escape hatch for constructs
+    PropertyDef can't represent (oneOf/anyOf, $ref, or anything add_raw_property/
+    define_reusable_schema introduced, most often via the free-text LLM-drafting path). A real
+    crash found live: this used to assume every property was a PropertyDef and do unconditional
+    attribute access (prop.type), which broke the moment a drafted schema had any field shaped
+    this way -- the guided wizard and the HTML preview already both handle this (see render.py),
+    but this CLI record-entry flow never did. Normalizing to a dict up front here means the same
+    question logic below handles both origins identically, rather than duplicating it per shape."""
+    defs = defs or {}
+    if isinstance(prop, PropertyDef):
+        prop = prop.model_dump(exclude_none=True, by_alias=True)
+    elif not isinstance(prop, dict):
+        # A bare true/false sub-schema (JSON Schema legally allows this) -- "anything goes" or
+        # "nothing is allowed." Neither has a sensible guided question; falls through to the
+        # raw-JSON prompt at the bottom (blank/optional skip still works for "nothing allowed").
+        prop = {}
+
+    if "$ref" in prop:
+        resolved = _resolve_ref_for_entry(prop, defs)
+        if resolved is not None:
+            return ask_record_value(field_name, resolved, required, defs=defs)
+
+    alternatives = prop.get("oneOf") or prop.get("anyOf")
+    if isinstance(alternatives, list) and alternatives:
+        return ask_one_of_value(field_name, alternatives, required, defs)
+
+    if prop.get("type") == "object" and prop.get("properties"):
+        return ask_nested_record_value(field_name, prop, required, defs=defs)
 
     suffix = " (required)" if required else " (optional, blank to skip)"
 
-    if prop.enum:
-        options = "/".join(prop.enum)
+    if prop.get("enum"):
+        options = "/".join(str(v) for v in prop["enum"])
         while True:
             raw = ask(f"  {field_name}{suffix} -- one of [{options}]:")
             if not raw:
@@ -49,13 +136,13 @@ def ask_record_value(field_name: str, prop: PropertyDef, required: bool):
                     print("  this field is required")
                     continue
                 return None
-            match = next((v for v in prop.enum if v.lower() == raw.lower()), None)
+            match = next((v for v in prop["enum"] if str(v).lower() == raw.lower()), None)
             if match is None:
                 print(f"  must be one of: {options}")
                 continue
             return match
 
-    if prop.type == "boolean":
+    if prop.get("type") == "boolean":
         while True:
             raw = ask(f"  {field_name}{suffix} -- yes/no:").lower()
             if not raw and not required:
@@ -66,7 +153,7 @@ def ask_record_value(field_name: str, prop: PropertyDef, required: bool):
                 return False
             print("  please answer yes or no")
 
-    if prop.type == "integer":
+    if prop.get("type") == "integer":
         while True:
             raw = ask(f"  {field_name}{suffix} -- whole number:")
             if not raw and not required:
@@ -76,7 +163,7 @@ def ask_record_value(field_name: str, prop: PropertyDef, required: bool):
             except ValueError:
                 print("  please enter a whole number")
 
-    if prop.type == "number":
+    if prop.get("type") == "number":
         while True:
             raw = ask(f"  {field_name}{suffix} -- number:")
             if not raw and not required:
@@ -86,7 +173,7 @@ def ask_record_value(field_name: str, prop: PropertyDef, required: bool):
             except ValueError:
                 print("  please enter a number")
 
-    if prop.format == "date":
+    if prop.get("format") == "date":
         while True:
             raw = ask(f"  {field_name}{suffix} -- date (YYYY-MM-DD):")
             if not raw and not required:
@@ -95,18 +182,40 @@ def ask_record_value(field_name: str, prop: PropertyDef, required: bool):
                 return raw
             print("  please use YYYY-MM-DD")
 
+    if prop.get("type") == "string" or not prop:
+        # A plain string field, or nothing at all was recognized on this dict (a bare-boolean
+        # sub-schema normalized to {} above) -- both get a plain free-text question, matching this
+        # project's existing behavior for an ordinary string field.
+        while True:
+            raw = ask(f"  {field_name}{suffix}:")
+            if raw or not required:
+                return raw or None
+            print("  this field is required")
+
+    # Genuinely exotic (type == "array", patternProperties, contains, propertyNames,
+    # unevaluatedProperties, or any combination this CLI has no dedicated question for) -- honest
+    # raw-JSON fallback rather than silently dropping the field, guessing wrong, or crashing.
+    print(f"  '{field_name}'{suffix} has an advanced rule guided entry doesn't have a question "
+          "for -- enter its value as raw JSON.")
     while True:
-        raw = ask(f"  {field_name}{suffix}:")
-        if raw or not required:
-            return raw or None
-        print("  this field is required")
+        raw = ask(f"  {field_name} (raw JSON):")
+        if not raw:
+            if required:
+                print("  this field is required")
+                continue
+            return None
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as e:
+            print(f"  not valid JSON ({e}) -- try again")
 
 
 def ask_record(schema: SchemaRequest) -> dict:
     print("\n--- New record ---")
+    defs = schema.definition.defs_ or {}
     record = {}
     for name, prop in schema.definition.properties.items():
-        value = ask_record_value(name, prop, name in schema.definition.required)
+        value = ask_record_value(name, prop, name in schema.definition.required, defs=defs)
         if value is not None:
             record[name] = value
     return record
